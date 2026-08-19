@@ -1,0 +1,74 @@
+{
+  "expo": {
+    "name": "forge-app",
+    "slug": "forge-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "forgeapp",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "icon": "./assets/expo.icon",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Forge needs camera access to scan your class schedule.",
+        "NSMicrophoneUsageDescription": "Forge needs microphone access for voice input.",
+        "NSPhotoLibraryUsageDescription": "Forge needs photo access to import your schedule.",
+        "NSCalendarsUsageDescription": "Forge reads your calendar to detect fixed events like college and meetings.",
+        "NSCalendarsFullAccessUsageDescription": "Forge reads your calendar to detect fixed events like college and meetings.",
+        "NSRemindersUsageDescription": "Forge uses reminders to keep your schedule on track."
+      },
+      "bundleIdentifier": "com.anonymous.forgeapp"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.forgeapp"
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#208AEF",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 76
+        }
+      ],
+      "expo-asset",
+      "expo-audio",
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Forge reads your calendar to detect fixed events like college and meetings.",
+          "remindersPermission": "Forge uses reminders to keep your schedule on track."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#E8E4DE",
+          "defaultChannel": "forge-reminders"
+        }
+      ],
+      [
+        "apple-health",
+        {
+          "healthSharePermission": "Forge reads your health data to understand your energy levels and activity patterns.",
+          "healthUpdatePermission": "Forge writes workout data to keep your activity log complete."
+        }
+      ]
+    ],
+    "experiments": {
+      "reactCompiler": true
+    }
+  }
+}

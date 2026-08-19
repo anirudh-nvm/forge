@@ -1,0 +1,1 @@
+Forge doesn’t help people do more. It helps them become more reliable to themselves.
