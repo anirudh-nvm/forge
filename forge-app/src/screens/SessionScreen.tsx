@@ -1,3 +1,4 @@
+import { useState } from "react";
 import Screen from "../components/ui/Screen";
 import { Title, Body } from "../components/ui/Typography";
 import { View, Text, StyleSheet } from "react-native";
@@ -9,6 +10,7 @@ import Button from "../components/ui/Button";
 import FadeInView from "../components/ui/FadeInView";
 import IdentityCard from "../components/intelligence/IdentityCard";
 import SessionStreak from "../components/intelligence/SessionStreak";
+import TaskCheckInModal from "../components/modals/TaskCheckInModal";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "@/types/navigation";
@@ -23,7 +25,9 @@ import {
 import { getOutcomeMessage } from "../engine/PromiseEngine";
 import { getTrustMessage } from "../engine/TrustEngine";
 import { buildIdentityCard, buildSessionStreak } from "../intelligence/IntelligenceBuilder";
+import { addTaskCheckIn } from "../ai/ConversationThreadEngine";
 import type { IdentityProgress } from "../identity/IdentityTypes";
+import type { TaskCheckInResponse } from "../types/companion";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "Session">;
 
@@ -39,6 +43,7 @@ export default function SessionScreen() {
     completedCommitments,
   } = useForge();
   const currentTime = useCurrentTime();
+  const [showCheckIn, setShowCheckIn] = useState(false);
 
   if (isLoading) {
     return (
@@ -216,7 +221,7 @@ export default function SessionScreen() {
 
               <View style={{ height: Spacing.xl }} />
 
-              <Button title="Move on" onPress={() => navigation.navigate("Today")} />
+              <Button title="Move on" onPress={() => setShowCheckIn(true)} />
               <View style={{ height: Spacing.sm }} />
               <Button title="View today's schedule" onPress={() => navigation.navigate("Today")} />
             </View>
@@ -261,6 +266,16 @@ export default function SessionScreen() {
           />
         </View>
       )}
+
+      <TaskCheckInModal
+        visible={showCheckIn}
+        commitmentTitle={currentSession.title}
+        onSelect={async (response: TaskCheckInResponse) => {
+          await addTaskCheckIn(currentSession.id, response);
+          setShowCheckIn(false);
+          navigation.navigate("Today");
+        }}
+      />
     </Screen>
   );
 }

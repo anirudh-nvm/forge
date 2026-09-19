@@ -8,6 +8,8 @@ import {
   Pressable,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
+  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
@@ -25,12 +27,19 @@ import { buildAdjustmentSuggestions } from "../engine/AdjustmentSuggestions";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "Adjustment">;
 
+type LearningPrompt = {
+  patternId: string;
+  message: string;
+  options: { label: string; value: string }[];
+};
+
 export default function AdjustmentScreen() {
   const navigation = useNavigation<Nav>();
   const { todayPlan, userName, adjustFromText } = useForge();
   const [inputText, setInputText] = useState("");
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [learningPrompts, setLearningPrompts] = useState<LearningPrompt[]>([]);
 
   const suggestions = todayPlan ? buildAdjustmentSuggestions(todayPlan) : [];
   const hasContent = inputText.trim().length > 0;
@@ -43,14 +52,48 @@ export default function AdjustmentScreen() {
   const handleUpdate = async () => {
     if (!hasContent || !todayPlan || isUpdating) return;
 
+    // Ask before major changes
+    const lower = inputText.toLowerCase();
+    const isMajor = /cancel|delete|remove|skip|don't\s+need|no\s+\w+\s+today/i.test(lower);
+
+    if (isMajor) {
+      Alert.alert(
+        "are you sure?",
+        "this will change your plan. want to continue?",
+        [
+          { text: "cancel", style: "cancel" },
+          { text: "yes, update", onPress: () => performUpdate() },
+        ]
+      );
+      return;
+    }
+
+    await performUpdate();
+  };
+
+  const performUpdate = async () => {
+    if (!hasContent || !todayPlan || isUpdating) return;
+
     setIsUpdating(true);
     const result = await adjustFromText(inputText);
     setIsUpdating(false);
 
     if (result.applied) {
-      navigation.navigate("Today");
+      if (result.learningPrompts && result.learningPrompts.length > 0) {
+        setLearningPrompts(result.learningPrompts);
+        setFeedback(result.explanation);
+      } else {
+        navigation.navigate("Today");
+      }
     } else {
-      setFeedback("i didn't find anything to change. try mentioning a commitment by name.");
+      setFeedback(result.explanation || "i didn't find anything to change. try mentioning a commitment by name.");
+    }
+  };
+
+  const handleLearningResponse = (patternId: string, value: string) => {
+    setLearningPrompts((prev) => prev.filter((p) => p.patternId !== patternId));
+    if (learningPrompts.length <= 1) {
+      navigation.navigate("Today");
     }
   };
 
@@ -72,6 +115,28 @@ export default function AdjustmentScreen() {
           {feedback && (
             <FadeInView delay={500}>
               <Text style={styles.feedback}>{feedback}</Text>
+            </FadeInView>
+          )}
+
+          {learningPrompts.length > 0 && (
+            <FadeInView delay={600}>
+              <Text style={styles.sectionTitle}>i noticed something</Text>
+              {learningPrompts.map((prompt) => (
+                <View key={prompt.patternId} style={styles.learningCard}>
+                  <Text style={styles.learningMessage}>{prompt.message}</Text>
+                  <View style={styles.learningButtons}>
+                    {prompt.options.map((opt) => (
+                      <Pressable
+                        key={opt.value}
+                        style={styles.learningButton}
+                        onPress={() => handleLearningResponse(prompt.patternId, opt.value)}
+                      >
+                        <Text style={styles.learningButtonText}>{opt.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              ))}
             </FadeInView>
           )}
 
@@ -97,7 +162,14 @@ export default function AdjustmentScreen() {
         </ScrollView>
 
         <FadeInView delay={900} style={styles.footer}>
-          <View style={styles.inputBar}>
+          {isUpdating && (
+            <View style={styles.loadingBar}>
+              <ActivityIndicator size="small" color={Colors.muted} />
+              <Text style={styles.loadingText}>updating your plan...</Text>
+            </View>
+          )}
+
+          <View style={[styles.inputBar, isUpdating && styles.inputDisabled]}>
             <TextInput
               style={styles.input}
               placeholder="tell me what changed..."
@@ -111,15 +183,16 @@ export default function AdjustmentScreen() {
               autoCorrect={false}
               onSubmitEditing={handleUpdate}
               returnKeyType="send"
+              editable={!isUpdating}
             />
           </View>
 
           <Pressable
-            style={[styles.updateButton, !hasContent && styles.updateDisabled]}
+            style={[styles.updateButton, (!hasContent || isUpdating) && styles.updateDisabled]}
             onPress={handleUpdate}
-            disabled={!hasContent}
+            disabled={!hasContent || isUpdating}
           >
-            <Text style={styles.updateButtonText}>update today</Text>
+            <Text style={styles.updateButtonText}>{isUpdating ? "updating..." : "update today"}</Text>
           </Pressable>
         </FadeInView>
       </KeyboardAvoidingView>
@@ -224,5 +297,49 @@ const styles = StyleSheet.create({
     fontSize: Typography.callout,
     fontFamily: FontFamily.regular,
     color: Colors.muted,
+  },
+  loadingBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 10,
+  },
+  loadingText: {
+    fontSize: Typography.subheadline,
+    fontFamily: FontFamily.regular,
+    color: Colors.muted,
+  },
+  inputDisabled: {
+    opacity: 0.5,
+  },
+  learningCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+  },
+  learningMessage: {
+    fontSize: Typography.body,
+    fontFamily: FontFamily.regular,
+    color: Colors.secondary,
+    lineHeight: 24,
+    marginBottom: 12,
+  },
+  learningButtons: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  learningButton: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  learningButtonText: {
+    fontSize: Typography.subheadline,
+    fontFamily: FontFamily.regular,
+    color: Colors.primary,
   },
 });

@@ -38,7 +38,7 @@ function isInRange(now: number, start: number, end: number): boolean {
 
 function getCommitmentsFromTimeline(timeline: TimelineItem[]): CommitmentRef[] {
   return timeline
-    .filter((item): item is TimelineItem & { kind: "commitment" } => item.kind === "commitment")
+    .filter((item): item is TimelineItem & { kind: "commitment" } => item.kind === "commitment" && !item.completed)
     .map((item) => ({
       id: item.id,
       title: item.title,

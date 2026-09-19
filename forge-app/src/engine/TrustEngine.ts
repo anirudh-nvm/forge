@@ -1,4 +1,5 @@
 import type { SessionOutcome, TrustEvent, TrustScore } from "../types/todayPlan";
+import type { RelationshipStage } from "../types/companion";
 
 const TRUST_RULES: Record<SessionOutcome, { protected: number; unprotected: number }> = {
   completed: { protected: 6, unprotected: 3 },
@@ -36,6 +37,7 @@ export function updateTrustScore(
   return {
     current: newCurrent,
     history: [...currentScore.history, event],
+    stage: currentScore.stage,
   };
 }
 
@@ -146,4 +148,43 @@ function buildContextualMessage(score: number, history: TrustEvent[]): string {
 
 export function getTrustMessage(score: number, history: TrustEvent[] = []): string {
   return buildContextualMessage(score, history);
+}
+
+export function calculateConsistency(history: TrustEvent[]): number {
+  if (history.length === 0) return 0;
+  let completions = 0;
+  for (const event of history) {
+    if (event.outcome === "completed") completions++;
+  }
+  return completions / history.length;
+}
+
+export function getRelationshipStage(
+  trustScore: number,
+  daysSinceFirstUse: number,
+  consistency: number
+): RelationshipStage {
+  if (trustScore > 85 && daysSinceFirstUse >= 90 && consistency >= 0.7) {
+    return "partner";
+  }
+  if (trustScore >= 70 && daysSinceFirstUse >= 30 && consistency >= 0.5) {
+    return "trusted";
+  }
+  if (trustScore >= 40 && daysSinceFirstUse >= 7) {
+    return "familiar";
+  }
+  return "new";
+}
+
+export function getStageMessage(stage: RelationshipStage): string {
+  switch (stage) {
+    case "new":
+      return "i might be wrong...";
+    case "familiar":
+      return "here's what i think.";
+    case "trusted":
+      return "i know you well enough to say this.";
+    case "partner":
+      return "i'm going to push back a little here.";
+  }
 }

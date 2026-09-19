@@ -19,6 +19,7 @@ import TodayScreen from "./src/screens/TodayScreen";
 import AdjustmentScreen from "./src/screens/AdjustmentScreen";
 import CommitmentScreen from "./src/screens/CommitmentScreen";
 import SessionScreen from "./src/screens/SessionScreen";
+import ReflectionScreen from "./src/screens/ReflectionScreen";
 
 import OnboardingWelcome from "./src/screens/onboarding/OnboardingWelcome";
 import OnboardingName from "./src/screens/onboarding/OnboardingName";
@@ -26,6 +27,7 @@ import OnboardingLifeSeason from "./src/screens/onboarding/OnboardingLifeSeason"
 import OnboardingPriorities from "./src/screens/onboarding/OnboardingPriorities";
 import OnboardingPersonality from "./src/screens/onboarding/OnboardingPersonality";
 import OnboardingReady from "./src/screens/onboarding/OnboardingReady";
+import OnboardingExplainer from "./src/screens/onboarding/OnboardingExplainer";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -94,11 +96,13 @@ export default function App() {
             <Stack.Screen name="OnboardingPriorities" component={OnboardingPriorities} />
             <Stack.Screen name="OnboardingPersonality" component={OnboardingPersonality} />
             <Stack.Screen name="OnboardingReady" component={OnboardingReady} />
+            <Stack.Screen name="OnboardingExplainer" component={OnboardingExplainer} />
             <Stack.Screen name="Today" component={TodayScreen} />
             <Stack.Screen name="Conversation" component={ConversationScreen} />
             <Stack.Screen name="Adjustment" component={AdjustmentScreen} />
             <Stack.Screen name="Commitment" component={CommitmentScreen} />
             <Stack.Screen name="Session" component={SessionScreen} />
+            <Stack.Screen name="Reflection" component={ReflectionScreen} />
           </Stack.Navigator>
           </NavigationContainer>
           {devPanelEnabled && (

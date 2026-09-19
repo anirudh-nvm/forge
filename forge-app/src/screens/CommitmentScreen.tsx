@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, Pressable } from "react-native";
+import { View, Text, StyleSheet, Pressable, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -32,27 +32,79 @@ function isCommitmentActive(startTime: string, endTime: string): boolean {
   return start !== -1 && end !== -1 && nowMinutes >= start && nowMinutes <= end;
 }
 
+const ENCOURAGEMENTS: Record<string, string[]> = {
+  College: [
+    "this is your time to grow. every lecture moves you closer to where you're headed.",
+    "showing up matters more than you think. this is how futures are built.",
+    "you chose this path. this block is proof you're serious about it.",
+  ],
+  Gym: [
+    "your body carries everything else you do. this hour is an investment in all of it.",
+    "you don't have to be perfect today. you just have to show up. and you did.",
+    "this is the kind of discipline that compounds. future you is grateful.",
+  ],
+  Meeting: [
+    "relationships are built on moments like these. showing up says more than words.",
+    "this connection matters. you're making time for what counts.",
+    "being present for someone is one of the most valuable things you can do.",
+  ],
+  "Competitive Exam": [
+    "every minute of prep brings you closer. this is the work nobody sees but everybody respects.",
+    "you're building something rare — the ability to perform when it matters most.",
+    "consistency beats talent. this study block is your edge.",
+  ],
+  "CAT Prep": [
+    "every minute of prep brings you closer. this is the work nobody sees but everybody respects.",
+    "you're building something rare — the ability to perform when it matters most.",
+    "consistency beats talent. this study block is your edge.",
+  ],
+  "Exam Prep": [
+    "every minute of prep brings you closer. this is the work nobody sees but everybody respects.",
+    "you're building something rare — the ability to perform when it matters most.",
+    "consistency beats talent. this study block is your edge.",
+  ],
+  Office: [
+    "deep work blocks like this are where career growth actually happens.",
+    "you're not just clocking in — you're building something that matters to you.",
+    "focus now, freedom later. this is the trade that pays off.",
+  ],
+  "DSA Practice": [
+    "problem-solving is a muscle. every session makes you sharper.",
+    "this is the grind that separates good from great. keep going.",
+    "you're training your mind to see patterns others miss.",
+  ],
+  Coding: [
+    "every line of code is a step forward. this is how builders build.",
+    "flow state is where the best work happens. protect this time.",
+    "you're solving problems most people won't even attempt.",
+  ],
+};
+
+const DEFAULT_ENCOURAGEMENTS = [
+  "this time was chosen with intention. it fits your day and your goals perfectly.",
+  "you told me this matters. i made sure the day agrees with you.",
+  "this block exists because you said yes to it. honor that.",
+  "not every hour needs to be optimized. some just need to be yours.",
+  "you're doing the work. this is just me making sure the day doesn't get in the way.",
+];
+
+function getEncouragement(title: string): string {
+  const messages = ENCOURAGEMENTS[title] ?? DEFAULT_ENCOURAGEMENTS;
+  const index = Math.floor(Math.random() * messages.length);
+  return messages[index];
+}
+
 type Nav = NativeStackNavigationProp<RootStackParamList, "Commitment">;
 type Route = RouteProp<RootStackParamList, "Commitment">;
 
 export default function CommitmentScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
-  const { todayPlan, isLoading, adjustPlan, startSession } = useForge();
+  const { todayPlan, isLoading, startSession } = useForge();
   const commitment = todayPlan?.commitments.find((c) => c.id === route.params.commitmentId);
   const note = commitment?.note || "let's make this work.";
 
   const context = commitment ? getContextForCommitment(commitment.title) : undefined;
-
-  const handleMoveEarlier = () => {
-    if (!commitment) return;
-    adjustPlan({ type: "moveEarlier", taskId: commitment.id, minutes: 30 });
-  };
-
-  const handleMoveLater = () => {
-    if (!commitment) return;
-    adjustPlan({ type: "moveLater", taskId: commitment.id, minutes: 30 });
-  };
 
   if (isLoading) {
     return (
@@ -207,54 +259,49 @@ export default function CommitmentScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <FadeInView delay={100}>
-          <View style={styles.circle} />
-        </FadeInView>
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        <View style={styles.content}>
+          <FadeInView delay={100}>
+            <View style={styles.circle} />
+          </FadeInView>
 
-        <FadeInView delay={200}>
-          <Text style={styles.title}>{commitment.title}</Text>
-        </FadeInView>
+          <FadeInView delay={200}>
+            <Text style={styles.title}>{commitment.title}</Text>
+          </FadeInView>
 
-        <FadeInView delay={300}>
-          <Text style={styles.timeRange}>
-            {commitment.startTime} – {commitment.endTime}
-          </Text>
-        </FadeInView>
+          <FadeInView delay={300}>
+            <Text style={styles.timeRange}>
+              {commitment.startTime} – {commitment.endTime}
+            </Text>
+          </FadeInView>
 
-        <FadeInView delay={400} style={styles.dividerContainer}>
-          <View style={styles.divider} />
-        </FadeInView>
+          <FadeInView delay={400} style={styles.dividerContainer}>
+            <View style={styles.divider} />
+          </FadeInView>
 
-        <FadeInView delay={500}>
-          <Text style={styles.note}>{note}</Text>
-        </FadeInView>
+          <FadeInView delay={500}>
+            <Text style={styles.note}>{note}</Text>
+          </FadeInView>
 
-        <FadeInView delay={550}>
-          <WhyCard
-            lifeDirection={context?.goalTitle}
-            goal={context?.projectTitle}
-            project={context?.taskTitle}
-            placementReasons={commitment.placementReasons}
-          />
-        </FadeInView>
+          <FadeInView delay={550}>
+            <WhyCard
+              lifeDirection={context?.goalTitle}
+              goal={context?.projectTitle}
+              project={context?.taskTitle}
+              placementReasons={commitment.placementReasons}
+              confidenceScore={commitment.confidence}
+            />
+          </FadeInView>
 
-        <FadeInView delay={600} style={styles.dividerContainer}>
-          <View style={styles.divider} />
-        </FadeInView>
+          <FadeInView delay={600} style={styles.dividerContainer}>
+            <View style={styles.divider} />
+          </FadeInView>
 
-        <FadeInView delay={700} style={styles.actions}>
-          <Pressable style={styles.action} onPress={handleMoveEarlier}>
-            <Text style={styles.actionText}>move earlier</Text>
-          </Pressable>
-          <Pressable style={styles.action} onPress={() => handleBegin(commitment.id)}>
-            <Text style={[styles.actionText, styles.actionPrimary]}>keep this</Text>
-          </Pressable>
-          <Pressable style={styles.action} onPress={handleMoveLater}>
-            <Text style={styles.actionText}>move later</Text>
-          </Pressable>
-        </FadeInView>
-      </View>
+          <FadeInView delay={700}>
+            <Text style={styles.encouragement}>{getEncouragement(commitment.title)}</Text>
+          </FadeInView>
+        </View>
+      </ScrollView>
 
       <FadeInView delay={800} style={styles.footer}>
         <Pressable style={styles.backButton} onPress={() => navigation.goBack()}>
@@ -270,6 +317,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+  },
   centered: {
     flex: 1,
     justifyContent: "center",
@@ -281,10 +334,9 @@ const styles = StyleSheet.create({
     color: Colors.muted,
   },
   content: {
-    flex: 1,
     paddingHorizontal: 24,
     paddingTop: 48,
-    justifyContent: "center",
+    paddingBottom: 24,
   },
   circle: {
     width: 16,
@@ -321,22 +373,12 @@ const styles = StyleSheet.create({
     color: Colors.muted,
     lineHeight: 26,
   },
-  actions: {
-    gap: 16,
-    marginTop: 8,
-  },
-  action: {
-    paddingVertical: 4,
-  },
-  actionText: {
-    fontSize: Typography.callout,
-    fontFamily: FontFamily.regular,
-    color: Colors.muted,
-  },
-  actionPrimary: {
-    fontFamily: FontFamily.medium,
-    color: Colors.primary,
+  encouragement: {
     fontSize: Typography.body,
+    fontFamily: FontFamily.regular,
+    color: Colors.secondary,
+    lineHeight: 26,
+    fontStyle: "italic",
   },
   footer: {
     paddingHorizontal: 24,

@@ -11,13 +11,18 @@ import { Spacing } from "../constants/spacing";
 import Divider from "../components/ui/Divider";
 import CommitmentRow from "../components/commitment/CommitmentRow";
 import FadeInView from "../components/ui/FadeInView";
+import PatternInsights from "../components/intelligence/PatternInsights";
+import { generatePatternInsights } from "../intelligence/patternInsights";
+import TrustEvolution from "../components/intelligence/TrustEvolution";
+import PredictionCard from "../components/intelligence/PredictionCard";
 import { useForge } from "../context/ForgeContext";
 import { useAIDevPanel } from "../context/AIDevPanelContext";
 import { useDayState } from "../hooks/useDayState";
 import { generateLiveBrief } from "../day/LiveBriefEngine";
 import { resetForge } from "../engine/ResetEngine";
 import { getPersonalizedGreeting } from "../utils/greeting";
-import type { PlanStatus } from "../types/todayPlan";
+import { narratePlan } from "../brain/PlanNarrator";
+import type { PlanStatus, TodayPlan } from "../types/todayPlan";
 import type { Commitment } from "../types/commitment";
 
 type Nav = NativeStackNavigationProp<RootStackParamList, "Today">;
@@ -93,6 +98,56 @@ function dedupeByTitle(commitments: Commitment[]): Commitment[] {
   );
 }
 
+function pickRandom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function getEmptyDayTitle(plan: TodayPlan): string {
+  const summary = plan.summary.join(" ").toLowerCase();
+  if (summary.includes("sick") || summary.includes("tired") || summary.includes("recovery") || summary.includes("rest")) {
+    return pickRandom([
+      "rest is productive too.",
+      "your body is asking for rest.",
+      "today is for recovery.",
+    ]);
+  }
+  if (summary.includes("break") || summary.includes("free") || summary.includes("open")) {
+    return pickRandom([
+      "open day, open possibilities.",
+      "today is yours to shape.",
+      "a blank canvas.",
+    ]);
+  }
+  return pickRandom([
+    "today is yours to shape.",
+    "nothing scheduled yet.",
+    "today is open.",
+  ]);
+}
+
+function getEmptyDayMessage(plan: TodayPlan): string {
+  const summary = plan.summary.join(" ").toLowerCase();
+  if (summary.includes("sick") || summary.includes("tired") || summary.includes("recovery")) {
+    return pickRandom([
+      "your body is asking for rest. listen to it. tomorrow will be better because you did.",
+      "rest isn't falling behind. it's making sure you can keep going when it matters.",
+      "taking care of yourself today means showing up stronger tomorrow.",
+    ]);
+  }
+  if (summary.includes("break")) {
+    return pickRandom([
+      "taking a break isn't falling behind. it's making sure you can keep going when it matters.",
+      "breaks are how you sustain momentum. this is strategic, not lazy.",
+      "even the best performers need downtime. this is yours.",
+    ]);
+  }
+  return pickRandom([
+    "no commitments scheduled. add something when you're ready, or just enjoy the space.",
+    "today is unstructured. that can be a gift if you let it.",
+    "nothing on the agenda. add something when you feel ready.",
+  ]);
+}
+
 export default function TodayScreen() {
   const navigation = useNavigation<Nav>();
   const { todayPlan, personality, approvePlan, isLoading, trustScore, userName } = useForge();
@@ -105,6 +160,7 @@ export default function TodayScreen() {
   const unscheduled = todayPlan?.unscheduled ?? [];
   const warnings = todayPlan?.warnings ?? [];
   const brief = todayPlan ? generateLiveBrief(dayState, todayPlan, personality) : null;
+  const narration = todayPlan ? narratePlan(todayPlan) : null;
   const planStatus: PlanStatus | null = todayPlan?.status ?? null;
   const [showFullSchedule, setShowFullSchedule] = useState(false);
 
@@ -117,6 +173,10 @@ export default function TodayScreen() {
 
   const handleAdjustToday = () => {
     navigation.navigate("Adjustment");
+  };
+
+  const handleReflect = () => {
+    navigation.navigate("Reflection");
   };
 
   const handleReset = () => {
@@ -155,9 +215,17 @@ export default function TodayScreen() {
           </Pressable>
         </FadeInView>
 
-        <FadeInView delay={400}>
-          <Text style={styles.contextLine}>{contextLine}</Text>
-        </FadeInView>
+        {!brief?.subheadline && (
+          <FadeInView delay={400}>
+            <Text style={styles.contextLine}>{contextLine}</Text>
+          </FadeInView>
+        )}
+
+        {narration && planStatus === "draft" && (
+          <FadeInView delay={500}>
+            <Text style={styles.narration}>{narration.headline}</Text>
+          </FadeInView>
+        )}
 
         <FadeInView delay={600} style={styles.dividerContainer}>
           <Divider />
@@ -211,19 +279,34 @@ export default function TodayScreen() {
             )}
 
             <FadeInView delay={750}>
-              <Text style={styles.sectionTitle}>today's plan</Text>
+              <Text style={styles.sectionTitle}>
+                {displayCommitments.length > 0 ? "today's plan" : "today's space"}
+              </Text>
             </FadeInView>
 
             <FadeInView delay={900}>
-              {displayCommitments.map((commitment) => (
-                <CommitmentRow
-                  key={commitment.id}
-                  commitment={commitment}
-                  sessionCount={sessionCountFor(commitment.title)}
-                  isCalendar={commitment.id.startsWith("cal-")}
-                  onPress={() => navigation.navigate("Commitment", { commitmentId: commitment.id })}
-                />
-              ))}
+              {displayCommitments.length > 0 ? (
+                displayCommitments.map((commitment) => (
+                  <CommitmentRow
+                    key={commitment.id}
+                    commitment={commitment}
+                    sessionCount={sessionCountFor(commitment.title)}
+                    isCalendar={commitment.id.startsWith("cal-")}
+                    onPress={() => navigation.navigate("Commitment", { commitmentId: commitment.id })}
+                  />
+                ))
+              ) : (
+                <View style={styles.emptyDayCard}>
+                  <Text style={styles.emptyDayTitle}>{getEmptyDayTitle(todayPlan)}</Text>
+                  <Text style={styles.emptyDayMessage}>{getEmptyDayMessage(todayPlan)}</Text>
+                  <Pressable
+                    style={styles.emptyDayButton}
+                    onPress={() => navigation.navigate("Adjustment")}
+                  >
+                    <Text style={styles.emptyDayButtonText}>plan something for later</Text>
+                  </Pressable>
+                </View>
+              )}
             </FadeInView>
 
             {unscheduled.length > 0 && (
@@ -247,6 +330,50 @@ export default function TodayScreen() {
                 {warnings.map((warning, index) => (
                   <Text key={index} style={styles.warning}>{warning}</Text>
                 ))}
+              </FadeInView>
+            )}
+
+            {/* Memory & Pattern Insights */}
+            {trustScore.history.length >= 3 && (
+              <FadeInView delay={1350}>
+                <TrustEvolution trustScore={trustScore} />
+              </FadeInView>
+            )}
+
+            {trustScore.history.length >= 5 && (
+              <FadeInView delay={1450}>
+                <PatternInsights
+                  insights={generatePatternInsights({
+                    trustTrend: {
+                      direction: (() => {
+                        const recent = trustScore.history.slice(-5);
+                        const avg = recent.reduce((sum, e) => sum + e.trustChange, 0) / recent.length;
+                        if (avg > 2) return "improving";
+                        if (avg < -2) return "declining";
+                        return "stable";
+                      })(),
+                      startScore: 50,
+                      endScore: trustScore.current,
+                    },
+                  })}
+                />
+              </FadeInView>
+            )}
+
+            {todayPlan.warnings.some(w => w.includes("buffer") || w.includes("longer")) && (
+              <FadeInView delay={1550}>
+                <PredictionCard
+                  predictions={todayPlan.warnings
+                    .filter(w => w.includes("buffer") || w.includes("longer"))
+                    .slice(0, 2)
+                    .map(w => ({
+                      title: "Task",
+                      trigger: w,
+                      suggestion: w,
+                      confidence: 0.7,
+                      type: "adjust_duration" as const,
+                    }))}
+                />
               </FadeInView>
             )}
           </>
@@ -319,22 +446,6 @@ export default function TodayScreen() {
                 />
               ))}
             </FadeInView>
-
-            {unscheduled.length > 0 && (
-              <>
-                <FadeInView delay={1150}>
-                  <Text style={styles.sectionTitle}>couldn't fit today</Text>
-                </FadeInView>
-                <FadeInView delay={1250}>
-                  {unscheduled.map((item) => (
-                    <View key={item.title} style={styles.unscheduledRow}>
-                      <Text style={styles.unscheduledTitle}>{item.title}</Text>
-                      <Text style={styles.unscheduledReason}>{item.reason}</Text>
-                    </View>
-                  ))}
-                </FadeInView>
-              </>
-            )}
 
             {warnings.length > 0 && (
               <FadeInView delay={1350}>
@@ -435,6 +546,12 @@ export default function TodayScreen() {
           </Pressable>
         )}
 
+        {todayPlan && commitments.length > 0 && commitments.every((c) => c.completed) && (
+          <Pressable style={styles.reflectButton} onPress={handleReflect}>
+            <Text style={styles.reflectButtonText}>reflect on today</Text>
+          </Pressable>
+        )}
+
         <Pressable style={styles.resetButton} onPress={handleReset}>
           <Text style={styles.resetButtonText}>reset forge</Text>
         </Pressable>
@@ -496,6 +613,21 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: 8,
   },
+  narration: {
+    fontSize: Typography.headline,
+    fontFamily: FontFamily.regular,
+    color: Colors.secondary,
+    lineHeight: 28,
+    marginBottom: 8,
+  },
+  heresWhy: {
+    fontSize: Typography.subheadline,
+    fontFamily: FontFamily.regular,
+    color: Colors.muted,
+    lineHeight: 20,
+    marginBottom: 4,
+    opacity: 0.7,
+  },
   dividerContainer: {
     marginVertical: 8,
   },
@@ -525,6 +657,37 @@ const styles = StyleSheet.create({
     fontFamily: FontFamily.regular,
     color: Colors.muted,
     marginTop: 8,
+  },
+  emptyDayCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
+    padding: 24,
+    marginTop: 8,
+  },
+  emptyDayTitle: {
+    fontSize: Typography.headline,
+    fontFamily: FontFamily.medium,
+    color: Colors.primary,
+    marginBottom: 8,
+  },
+  emptyDayMessage: {
+    fontSize: Typography.body,
+    fontFamily: FontFamily.regular,
+    color: Colors.muted,
+    lineHeight: 24,
+    marginBottom: 16,
+  },
+  emptyDayButton: {
+    backgroundColor: Colors.divider,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    alignSelf: "flex-start",
+  },
+  emptyDayButtonText: {
+    fontSize: Typography.callout,
+    fontFamily: FontFamily.regular,
+    color: Colors.primary,
   },
   activeCommitmentCard: {
     marginTop: 24,
@@ -570,7 +733,8 @@ const styles = StyleSheet.create({
   },
   footer: {
     paddingHorizontal: 24,
-    paddingBottom: 48,
+    paddingBottom: 16,
+    paddingTop: 8,
     gap: 10,
   },
   primaryButton: {
@@ -595,9 +759,23 @@ const styles = StyleSheet.create({
     fontFamily: FontFamily.regular,
     color: Colors.muted,
   },
-  resetButton: {
-    paddingVertical: 8,
+  reflectButton: {
+    backgroundColor: Colors.surface,
+    paddingVertical: 14,
+    borderRadius: 20,
     alignItems: "center",
+    borderLeftWidth: 2,
+    borderLeftColor: Colors.muted,
+  },
+  reflectButtonText: {
+    fontSize: Typography.headline,
+    fontFamily: FontFamily.regular,
+    color: Colors.secondary,
+  },
+  resetButton: {
+    paddingVertical: 12,
+    alignItems: "center",
+    marginTop: 8,
   },
   resetButtonText: {
     fontSize: Typography.footnote,

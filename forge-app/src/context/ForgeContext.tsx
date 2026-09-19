@@ -13,6 +13,8 @@ import { createEmptyPatternMemory } from "../ai/PatternLearner";
 import { createEmptyConversationMemory } from "../ai/ConversationMemory";
 import { explainChanges, formatChangeExplanation } from "../ai/ChangeExplainer";
 import { updateTrustScore } from "../engine/TrustEngine";
+import * as MemoryEngine from "../memory/MemoryEngine";
+import * as BeliefsEngine from "../memory/BeliefsEngine";
 import {
   checkLifecycleState,
   archiveYesterday,
@@ -69,7 +71,7 @@ type ForgeContextType = ForgeState & {
   toggleCommitment: (id: string) => void;
   setLoading: (loading: boolean) => void;
   completeSession: (outcome: SessionOutcome) => void;
-  generateTodayPlan: (conversation: string) => Promise<void>;
+  generateTodayPlan: (conversation: string) => Promise<import("../brain/types").BrainOutput>;
   adjustPlan: (adjustment: Adjustment) => void;
   adjustFromText: (text: string) => Promise<AdjustFromTextResult>;
   approvePlan: () => void;
@@ -86,6 +88,7 @@ export type AdjustFromTextResult = {
   applied: boolean;
   aiUsed: boolean;
   plan?: TodayPlan;
+  learningPrompts?: { patternId: string; message: string; options: { label: string; value: string }[] }[];
 };
 
 const ForgeContext = createContext<ForgeContextType | null>(null);
@@ -99,7 +102,7 @@ export function ForgeProvider({ children }: { children: ReactNode }) {
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
   const [completedCommitments, setCompletedCommitments] = useState<string[]>([]);
   const [isLoading, setLoading] = useState(false);
-  const [trustScore, setTrustScore] = useState<TrustScore>({ current: 50, history: [] });
+  const [trustScore, setTrustScore] = useState<TrustScore>({ current: 50, history: [], stage: "new" });
   const [morningSentence, setMorningSentence] = useState("");
   const [morningGreeting, setMorningGreeting] = useState("");
   const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
@@ -108,6 +111,10 @@ export function ForgeProvider({ children }: { children: ReactNode }) {
   const [githubData, setGithubData] = useState<GitHubData | null>(null);
 
   const ai = useMemo(() => createForgeAI(), []);
+
+  useEffect(() => {
+    ai.client.warmup();
+  }, []);
   const [awareness, setAwareness] = useState<Awareness>(() =>
     createAwareness(createEmptyPatternMemory(), createEmptyConversationMemory())
   );
@@ -284,6 +291,43 @@ export function ForgeProvider({ children }: { children: ReactNode }) {
       recordCompleted(currentSession.id, currentSession.title);
     }
 
+    // Mark commitment as completed in the plan so DayStateEngine skips it
+    setTodayPlan((plan) => {
+      if (!plan) return plan;
+      return {
+        ...plan,
+        commitments: plan.commitments.map((c) =>
+          c.id === currentSession.id
+            ? { ...c, completed: true }
+            : c
+        ),
+        timeline: plan.timeline.map((t) =>
+          t.id === currentSession.id
+            ? { ...t, completed: true }
+            : t
+        ),
+      };
+    });
+
+    setCompletedCommitments((prev) =>
+      prev.includes(currentSession.id)
+        ? prev
+        : [...prev, currentSession.id]
+    );
+
+    const now = new Date();
+    MemoryEngine.recordOutcome({
+      title: currentSession.title,
+      plannedDate: now.toISOString().split("T")[0],
+      plannedStart: currentSession.scheduledStart,
+      plannedEnd: currentSession.scheduledEnd,
+      actualStart: currentSession.actualStart,
+      actualEnd: currentSession.actualEnd ?? `${now.getHours()}:${String(now.getMinutes()).padStart(2, "0")}`,
+      outcome,
+    }).then(() => {
+      BeliefsEngine.buildBeliefsFromMemory().catch(() => {});
+    }).catch(() => {});
+
     setCurrentSession((prev) =>
       prev ? { ...prev, status: "completed", outcome } : null
     );
@@ -303,6 +347,7 @@ export function ForgeProvider({ children }: { children: ReactNode }) {
     if (NE) await NE.schedulePlanReminders(output.todayPlan.commitments);
 
     setLoading(false);
+    return output;
   }, [understand, priorities, trustScore, calendarEvents]);
 
   const adjustPlan = useCallback((adjustment: Adjustment) => {
@@ -318,24 +363,48 @@ export function ForgeProvider({ children }: { children: ReactNode }) {
 
       const before = todayPlan;
 
-      const aiResult = await ai.intent.understand(text, before);
+      const { resolveReference } = await import("../ai/ReferenceResolver");
+      const { resolved } = resolveReference(text, before, awareness.store.conversationMemory, new Date());
+
+      const aiResult = await ai.intent.understand(resolved, before);
       const aiApplied =
         aiResult.apply?.plan &&
-        aiResult.apply.changes.length > 0 &&
-        aiResult.resolution.status === "resolved";
+        aiResult.apply.changes.length > 0;
 
       if (aiApplied && aiResult.apply) {
         const after = aiResult.apply.plan;
-        const changeSummary = formatChangeExplanation(explainChanges(before, after));
-        const explanation = aiResult.failure
-          ? `${aiResult.failure.userMessage}\n${changeSummary}`
-          : changeSummary;
-        setTodayPlan(after);
-        awareness.learn(before, after);
-        awareness.addTurn(text, before);
-        const NE = await tryImportNative(() => import("../engine/NotificationEngine"));
-        if (NE) await NE.schedulePlanReminders(after.commitments);
-        return { explanation, applied: true, aiUsed: aiResult.source === "ai", plan: after };
+        const planChanged = before.commitments.some((c, i) => {
+          const a = after.commitments.find((x) => x.id === c.id);
+          return !a || a.startTime !== c.startTime || a.endTime !== c.endTime;
+        }) || before.commitments.length !== after.commitments.length;
+
+        let explanation: string;
+        if (planChanged) {
+          explanation = formatChangeExplanation(explainChanges(before, after));
+        } else {
+          const rejections = aiResult.apply.changes
+            .filter((c) => c.detail.includes("can't"))
+            .map((c) => `${c.title}: ${c.detail}`);
+          explanation = rejections.length > 0
+            ? rejections.join("\n")
+            : "nothing changed.";
+        }
+
+        if (aiResult.failure && !planChanged) {
+          explanation = `${aiResult.failure.userMessage}\n${explanation}`;
+        }
+
+        if (planChanged) {
+          setTodayPlan(after);
+          awareness.learn(before, after);
+          awareness.addTurn(text, before);
+          const NE = await tryImportNative(() => import("../engine/NotificationEngine"));
+          if (NE) await NE.schedulePlanReminders(after.commitments);
+        }
+
+        const learningPrompts = awareness.getLearningPrompts();
+
+        return { explanation, applied: planChanged, aiUsed: aiResult.source === "ai", plan: after, learningPrompts };
       }
 
       const explanation = formatChangeExplanation(explainChanges(before, before));

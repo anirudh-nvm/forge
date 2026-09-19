@@ -5,6 +5,10 @@ export type AdjustmentSuggestion = {
   message: string;
 };
 
+function pickRandom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
 export function buildAdjustmentSuggestions(plan: TodayPlan): AdjustmentSuggestion[] {
   if (!plan || plan.commitments.length === 0) return [];
 
@@ -16,13 +20,14 @@ export function buildAdjustmentSuggestions(plan: TodayPlan): AdjustmentSuggestio
   const fixedEvent = active.find((c) => c.locked);
 
   if (fixedEvent) {
+    const title = fixedEvent.title.toLowerCase();
     suggestions.push({
-      label: `i'm leaving ${fixedEvent.title.toLowerCase()} early`,
-      message: `i'm leaving ${fixedEvent.title.toLowerCase()} early`,
+      label: pickRandom([`i'm leaving ${title} early`, `${title} ends early today`]),
+      message: `i'm leaving ${title} early`,
     });
     suggestions.push({
-      label: `${fixedEvent.title.toLowerCase()} got cancelled`,
-      message: `${fixedEvent.title.toLowerCase()} got cancelled`,
+      label: pickRandom([`${title} got cancelled`, `skip ${title} today`]),
+      message: `${title} got cancelled`,
     });
   }
 
@@ -31,42 +36,44 @@ export function buildAdjustmentSuggestions(plan: TodayPlan): AdjustmentSuggestio
   if (flexible.length > 0) {
     const first = flexible[0];
     const last = flexible[flexible.length - 1];
+    const firstTitle = first.title.toLowerCase();
 
     suggestions.push({
-      label: `move ${first.title.toLowerCase()} earlier`,
-      message: `move ${first.title.toLowerCase()} earlier`,
+      label: pickRandom([`move ${firstTitle} earlier`, `${firstTitle} should be earlier`]),
+      message: `move ${firstTitle} earlier`,
     });
 
+    const lastTitle = last.title.toLowerCase();
     if (last.title !== first.title) {
       suggestions.push({
-        label: `move ${last.title.toLowerCase()} later`,
-        message: `move ${last.title.toLowerCase()} later`,
+        label: pickRandom([`move ${lastTitle} later`, `${lastTitle} should be later`]),
+        message: `move ${lastTitle} later`,
       });
     } else {
       suggestions.push({
-        label: `move ${first.title.toLowerCase()} later`,
-        message: `move ${first.title.toLowerCase()} later`,
+        label: pickRandom([`move ${firstTitle} later`, `${firstTitle} should be later`]),
+        message: `move ${firstTitle} later`,
       });
     }
 
     suggestions.push({
-      label: `cancel ${flexible[0].title.toLowerCase()}`,
-      message: `cancel ${flexible[0].title.toLowerCase()}`,
+      label: pickRandom([`cancel ${firstTitle}`, `skip ${firstTitle} today`]),
+      message: `cancel ${firstTitle}`,
     });
 
     suggestions.push({
-      label: `i need another hour for ${first.title.toLowerCase()}`,
-      message: `i need another hour for ${first.title.toLowerCase()}`,
+      label: pickRandom([`i need more time for ${firstTitle}`, `need another hour for ${firstTitle}`]),
+      message: `i need another hour for ${firstTitle}`,
     });
   }
 
   suggestions.push({
-    label: "add a new task",
+    label: pickRandom(["add something new", "add a new task", "i have something else"]),
     message: "add a new task",
   });
 
   suggestions.push({
-    label: "i'm feeling tired",
+    label: pickRandom(["i'm feeling tired", "energy is low today", "i need a lighter day"]),
     message: "i'm feeling tired",
   });
 
