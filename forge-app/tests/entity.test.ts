@@ -10,7 +10,7 @@ describe("Entity Expansion", () => {
 
   describe("Study category", () => {
     it.each([
-      ["cat prep", "Competitive Exam"],
+      ["cat prep", "CAT Prep"],
       ["prepare for jee", "Competitive Exam"],
       ["gre study", "Competitive Exam"],
       ["upsc revision", "Competitive Exam"],

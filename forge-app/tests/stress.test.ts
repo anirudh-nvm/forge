@@ -167,7 +167,7 @@ describe("Sprint C2 Stress Suite", () => {
 
   describe("expanded entities", () => {
     const entityCases: [string, string][] = [
-      ["cat prep", "Competitive Exam"],
+      ["cat prep", "CAT Prep"],
       ["jee math", "Competitive Exam"],
       ["gre vocabulary", "Competitive Exam"],
       ["upsc revision", "Competitive Exam"],

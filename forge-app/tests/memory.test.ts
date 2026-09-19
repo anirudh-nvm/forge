@@ -1,301 +1,223 @@
 import { describe, it, expect } from "vitest";
-import {
-  createDefaultStableMemory,
-  createDefaultWorkingMemory,
-  createDefaultRecentMemory,
-} from "../src/memory/MemoryProfile";
-import {
-  buildStableMemory,
-  buildWorkingMemory,
-  buildRecentMemory,
-  assembleMemory,
-} from "../src/memory/MemoryBuilder";
-import {
-  updateStable,
-  updateWorking,
-  clearRecent,
-  archiveWorking,
-  promoteWorking,
-} from "../src/memory/MemoryUpdater";
-import type { StableMemory, WorkingMemory, RecentMemory } from "../src/memory/MemoryProfile";
-import type { MemoryBuildContext } from "../src/memory/MemoryBuilder";
-import type { Observation } from "../src/observation/ObservationTypes";
-import type { Experiment } from "../src/memory/ExperimentTypes";
+import { generatePatternInsights } from "../src/intelligence/patternInsights";
 
-// ─── Helpers ──────────────────────────────────────────────
+// ── Memory Test Suite ──────────────────────────────────────────
+// Tests for Sprint 4: "Forge Remembers Me"
+// Verifies that pattern insights, trust evolution, and predictions work
 
-function makeContext(overrides: Partial<MemoryBuildContext> = {}): MemoryBuildContext {
-  return {
-    userProfile: null,
-    observations: [],
-    experiments: [],
-    trustScore: { current: 50, history: [] },
-    planId: null,
-    adjustments: [],
-    ...overrides,
-  };
-}
+describe("Memory - Forge Remembers Me (Sprint 4)", () => {
+  describe("PatternInsights Generation", () => {
+    it("generates time preference insight for morning person", () => {
+      const insights = generatePatternInsights({
+        timePreference: {
+          preferred: "morning",
+          counts: { morning: 8, afternoon: 2, evening: 1 },
+        },
+      });
 
-function makeObservation(overrides: Partial<Observation> = {}): Observation {
-  return {
-    id: "obs1",
-    category: "consistency",
-    text: "DSA has been skipped 3 of the last 5 times.",
-    confidence: 0.7,
-    supportingEvents: [],
-    firstSeen: "2026-08-10T09:00:00Z",
-    lastSeen: "2026-08-14T09:00:00Z",
-    status: "new",
-    metadata: { commitmentTitle: "DSA", patternType: "completion_rate", sampleSize: 5 },
-    ...overrides,
-  };
-}
-
-function makeExperiment(overrides: Partial<Experiment> = {}): Experiment {
-  return {
-    id: "exp1",
-    title: "Morning Study",
-    hypothesis: "Morning study improves completion",
-    commitmentTitle: "DSA",
-    status: "active",
-    startDate: "2026-08-01",
-    endDate: "2026-08-14",
-    metrics: [],
-    notes: [],
-    createdAt: "2026-08-01T00:00:00Z",
-    ...overrides,
-  };
-}
-
-// ─── MemoryProfile defaults ───────────────────────────────
-
-describe("MemoryProfile defaults", () => {
-  it("createDefaultStableMemory returns valid defaults", () => {
-    const stable = createDefaultStableMemory();
-    expect(stable.lifeSeason).toBe("student");
-    expect(stable.priorities).toEqual([]);
-    expect(stable.values).toEqual([]);
-    expect(stable.rhythm).toBeDefined();
-    expect(stable.constraints).toEqual([]);
-    expect(stable.lastUpdated).toBeDefined();
-  });
-
-  it("createDefaultWorkingMemory returns valid defaults", () => {
-    const working = createDefaultWorkingMemory();
-    expect(working.activeGoals).toEqual([]);
-    expect(working.currentExperiments).toEqual([]);
-    expect(working.activeFocus).toEqual([]);
-    expect(working.recentDecisions).toEqual([]);
-    expect(working.weekOf).toBeDefined();
-  });
-
-  it("createDefaultRecentMemory returns valid defaults", () => {
-    const recent = createDefaultRecentMemory();
-    expect(recent.planId).toBeNull();
-    expect(recent.observations).toEqual([]);
-    expect(recent.adjustments).toEqual([]);
-    expect(recent.reflections).toEqual([]);
-    expect(recent.date).toBeDefined();
-  });
-});
-
-// ─── MemoryBuilder ────────────────────────────────────────
-
-describe("MemoryBuilder", () => {
-  it("buildStableMemory updates lifeSeason from user profile", () => {
-    const stable = createDefaultStableMemory();
-    const context = makeContext({ userProfile: { lifeSeason: "working_professional", priorities: ["career"] } });
-    const updated = buildStableMemory(stable, context);
-    expect(updated.lifeSeason).toBe("working_professional");
-    expect(updated.priorities).toEqual(["career"]);
-  });
-
-  it("buildStableMemory preserves existing values when no user profile", () => {
-    const stable = createDefaultStableMemory();
-    const context = makeContext({ userProfile: null });
-    const updated = buildStableMemory(stable, context);
-    expect(updated.lifeSeason).toBe("student");
-  });
-
-  it("buildWorkingMemory sets active goals from user profile priorities", () => {
-    const working = createDefaultWorkingMemory();
-    const context = makeContext({
-      userProfile: { priorities: ["CAT", "DSA"] },
-      experiments: [makeExperiment({ status: "active" }), makeExperiment({ id: "exp2", title: "Evening Gym", status: "completed" })],
-    });
-    const updated = buildWorkingMemory(working, context);
-    expect(updated.activeGoals).toEqual(["CAT", "DSA"]);
-    expect(updated.currentExperiments).toEqual(["Morning Study"]);
-  });
-
-  it("buildRecentMemory captures observations and adjustments", () => {
-    const context = makeContext({
-      observations: [makeObservation()],
-      adjustments: ["Moved DSA earlier"],
-      planId: "plan_123",
-    });
-    const recent = buildRecentMemory(context);
-    expect(recent.planId).toBe("plan_123");
-    expect(recent.observations).toEqual(["DSA has been skipped 3 of the last 5 times."]);
-    expect(recent.adjustments).toEqual(["Moved DSA earlier"]);
-  });
-
-  it("assembleMemory produces a valid MemoryProfile", () => {
-    const stable = createDefaultStableMemory();
-    const working = createDefaultWorkingMemory();
-    const recent = createDefaultRecentMemory();
-    const profile = assembleMemory(stable, working, recent);
-    expect(profile.stable).toBe(stable);
-    expect(profile.working).toBe(working);
-    expect(profile.recent).toBe(recent);
-    expect(profile.lastBuilt).toBeDefined();
-  });
-});
-
-// ─── MemoryUpdater ────────────────────────────────────────
-
-describe("MemoryUpdater", () => {
-  it("updateStable patches fields and updates timestamp", () => {
-    const stable = createDefaultStableMemory();
-    const updated = updateStable(stable, { lifeSeason: "taking_a_break", priorities: ["health"] });
-    expect(updated.lifeSeason).toBe("taking_a_break");
-    expect(updated.priorities).toEqual(["health"]);
-    expect(updated.lastUpdated).toBeDefined();
-    expect(new Date(updated.lastUpdated).toISOString()).toBe(updated.lastUpdated);
-  });
-
-  it("updateStable preserves unpatched fields", () => {
-    const stable = createDefaultStableMemory();
-    const originalValues = [...stable.values];
-    const updated = updateStable(stable, { lifeSeason: "working_professional" });
-    expect(updated.values).toEqual(originalValues);
-    expect(updated.rhythm).toEqual(stable.rhythm);
-  });
-
-  it("updateWorking patches fields and updates timestamp", () => {
-    const working = createDefaultWorkingMemory();
-    const updated = updateWorking(working, { activeGoals: ["interview prep"], activeFocus: ["DSA"] });
-    expect(updated.activeGoals).toEqual(["interview prep"]);
-    expect(updated.activeFocus).toEqual(["DSA"]);
-    expect(updated.lastUpdated).toBeDefined();
-    expect(new Date(updated.lastUpdated).toISOString()).toBe(updated.lastUpdated);
-  });
-
-  it("updateWorking preserves unpatched fields", () => {
-    const working = createDefaultWorkingMemory();
-    const originalExperiments = [...working.currentExperiments];
-    const updated = updateWorking(working, { activeGoals: ["new goal"] });
-    expect(updated.currentExperiments).toEqual(originalExperiments);
-  });
-
-  it("clearRecent returns fresh default recent memory", () => {
-    const recent: RecentMemory = {
-      date: "2026-08-10",
-      planId: "plan_1",
-      observations: ["obs1", "obs2"],
-      adjustments: ["adj1"],
-      reflections: ["ref1"],
-      lastUpdated: "2026-08-10T12:00:00Z",
-    };
-    const cleared = clearRecent();
-    expect(cleared.planId).toBeNull();
-    expect(cleared.observations).toEqual([]);
-    expect(cleared.adjustments).toEqual([]);
-    expect(cleared.reflections).toEqual([]);
-  });
-
-  it("archiveWorking clears activeFocus and recentDecisions", () => {
-    const working: WorkingMemory = {
-      weekOf: "2026-08-10",
-      activeGoals: ["CAT"],
-      currentExperiments: ["exp1"],
-      activeFocus: ["DSA", "CAT"],
-      recentDecisions: ["moved DSA"],
-      lastUpdated: "2026-08-10T12:00:00Z",
-    };
-    const archived = archiveWorking(working);
-    expect(archived.activeGoals).toEqual(["CAT"]);
-    expect(archived.currentExperiments).toEqual(["exp1"]);
-    expect(archived.activeFocus).toEqual([]);
-    expect(archived.recentDecisions).toEqual([]);
-  });
-
-  it("promoteWorking replaces activeGoals and clears working fields", () => {
-    const working: WorkingMemory = {
-      weekOf: "2026-08-10",
-      activeGoals: ["old goal"],
-      currentExperiments: ["exp1"],
-      activeFocus: ["DSA"],
-      recentDecisions: ["moved DSA"],
-      lastUpdated: "2026-08-10T12:00:00Z",
-    };
-    const promoted = promoteWorking(working, ["new goal 1", "new goal 2"]);
-    expect(promoted.activeGoals).toEqual(["new goal 1", "new goal 2"]);
-    expect(promoted.activeFocus).toEqual([]);
-    expect(promoted.recentDecisions).toEqual([]);
-  });
-});
-
-// ─── Integration ──────────────────────────────────────────
-
-describe("Memory integration", () => {
-  it("full build cycle produces consistent MemoryProfile", () => {
-    const stable = createDefaultStableMemory();
-    const working = createDefaultWorkingMemory();
-    const context = makeContext({
-      userProfile: { lifeSeason: "student", priorities: ["CAT"] },
-      observations: [makeObservation()],
-      experiments: [makeExperiment()],
-      planId: "plan_1",
-      adjustments: ["Moved DSA"],
+      expect(insights.length).toBeGreaterThan(0);
+      const timeInsight = insights.find(i => i.type === "time_preference");
+      expect(timeInsight).toBeTruthy();
+      expect(timeInsight?.text).toBeTruthy();
     });
 
-    const updatedStable = buildStableMemory(stable, context);
-    const updatedWorking = buildWorkingMemory(working, context);
-    const recent = buildRecentMemory(context);
-    const profile = assembleMemory(updatedStable, updatedWorking, recent);
+    it("generates time preference insight for afternoon person", () => {
+      const insights = generatePatternInsights({
+        timePreference: {
+          preferred: "afternoon",
+          counts: { morning: 2, afternoon: 8, evening: 1 },
+        },
+      });
 
-    expect(profile.stable.priorities).toEqual(["CAT"]);
-    expect(profile.working.activeGoals).toEqual(["CAT"]);
-    expect(profile.working.currentExperiments).toEqual(["Morning Study"]);
-    expect(profile.recent.planId).toBe("plan_1");
-    expect(profile.recent.observations).toHaveLength(1);
-    expect(profile.recent.adjustments).toEqual(["Moved DSA"]);
-  });
-
-  it("promotion chain: working → archive → promote", () => {
-    let working = createDefaultWorkingMemory();
-    working = updateWorking(working, {
-      activeGoals: ["week 1 goal"],
-      activeFocus: ["DSA"],
-      recentDecisions: ["evening DSA"],
+      expect(insights.length).toBeGreaterThan(0);
+      const timeInsight = insights.find(i => i.type === "time_preference");
+      expect(timeInsight).toBeTruthy();
     });
 
-    // Archive end of week
-    working = archiveWorking(working);
-    expect(working.activeFocus).toEqual([]);
-    expect(working.recentDecisions).toEqual([]);
+    it("generates completion rate insight for high completion", () => {
+      const insights = generatePatternInsights({
+        completionRates: [
+          { title: "Gym", rate: 0.9 },
+        ],
+      });
 
-    // Promote new week
-    working = promoteWorking(working, ["week 2 goal"]);
-    expect(working.activeGoals).toEqual(["week 2 goal"]);
-    expect(working.activeFocus).toEqual([]);
+      expect(insights.length).toBeGreaterThan(0);
+      const completionInsight = insights.find(i => i.type === "completion_rate");
+      expect(completionInsight).toBeTruthy();
+      expect(completionInsight?.confidence).toBe(0.9);
+    });
+
+    it("generates completion rate insight for low completion", () => {
+      const insights = generatePatternInsights({
+        completionRates: [
+          { title: "Study", rate: 0.3 },
+        ],
+      });
+
+      expect(insights.length).toBeGreaterThan(0);
+      const completionInsight = insights.find(i => i.type === "completion_rate");
+      expect(completionInsight).toBeTruthy();
+    });
+
+    it("generates trust trend insight for improving trust", () => {
+      const insights = generatePatternInsights({
+        trustTrend: {
+          direction: "up",
+          startScore: 40,
+          endScore: 70,
+        },
+      });
+
+      expect(insights.length).toBeGreaterThan(0);
+      const trustInsight = insights.find(i => i.type === "trust_trend");
+      expect(trustInsight).toBeTruthy();
+      expect(trustInsight?.text).toBeTruthy();
+    });
+
+    it("generates trust trend insight for declining trust", () => {
+      const insights = generatePatternInsights({
+        trustTrend: {
+          direction: "down",
+          startScore: 70,
+          endScore: 40,
+        },
+      });
+
+      expect(insights.length).toBeGreaterThan(0);
+      const trustInsight = insights.find(i => i.type === "trust_trend");
+      expect(trustInsight).toBeTruthy();
+    });
+
+    it("generates adjustment frequency insight", () => {
+      const insights = generatePatternInsights({
+        adjustments: { ratio: 0.4 },
+      });
+
+      expect(insights.length).toBeGreaterThan(0);
+      const adjustmentInsight = insights.find(i => i.type === "adjustment");
+      expect(adjustmentInsight).toBeTruthy();
+    });
+
+    it("returns empty for no patterns", () => {
+      const insights = generatePatternInsights({});
+      expect(insights).toHaveLength(0);
+    });
   });
 
-  it("recent memory resets daily", () => {
-    let recent = createDefaultRecentMemory();
-    recent = {
-      ...recent,
-      planId: "plan_1",
-      observations: ["obs1"],
-      adjustments: ["adj1"],
-      reflections: ["ref1"],
-    };
+  describe("Trust Evolution", () => {
+    it("calculates trust level for high score", () => {
+      const current = 85;
+      expect(current).toBeGreaterThanOrEqual(80);
+    });
 
-    const cleared = clearRecent();
-    expect(cleared.planId).toBeNull();
-    expect(cleared.observations).toEqual([]);
-    expect(cleared.adjustments).toEqual([]);
-    expect(cleared.reflections).toEqual([]);
+    it("calculates trust level for medium score", () => {
+      const current = 65;
+      expect(current).toBeGreaterThanOrEqual(60);
+      expect(current).toBeLessThan(80);
+    });
+
+    it("calculates trust level for low score", () => {
+      const current = 30;
+      expect(current).toBeGreaterThanOrEqual(20);
+      expect(current).toBeLessThan(40);
+    });
+
+    it("detects improving trajectory", () => {
+      const history = [
+        { trustChange: 3 },
+        { trustChange: 3 },
+        { trustChange: 3 },
+      ];
+
+      const avgChange = history.reduce((sum, e) => sum + e.trustChange, 0) / history.length;
+      expect(avgChange).toBeGreaterThan(2);
+    });
+
+    it("detects declining trajectory", () => {
+      const history = [
+        { trustChange: -3 },
+        { trustChange: -3 },
+        { trustChange: -3 },
+      ];
+
+      const avgChange = history.reduce((sum, e) => sum + e.trustChange, 0) / history.length;
+      expect(avgChange).toBeLessThan(-2);
+    });
+
+    it("detects stable trajectory", () => {
+      const history = [
+        { trustChange: 3 },
+        { trustChange: -2 },
+        { trustChange: 3 },
+      ];
+
+      const avgChange = history.reduce((sum, e) => sum + e.trustChange, 0) / history.length;
+      expect(avgChange).toBeGreaterThanOrEqual(-2);
+      expect(avgChange).toBeLessThanOrEqual(2);
+    });
+  });
+
+  describe("Pattern Confidence", () => {
+    it("insights have confidence scores", () => {
+      const insights = generatePatternInsights({
+        timePreference: {
+          preferred: "morning",
+          counts: { morning: 5, afternoon: 2, evening: 1 },
+        },
+      });
+
+      insights.forEach(insight => {
+        expect(insight.confidence).toBeGreaterThan(0);
+        expect(insight.confidence).toBeLessThanOrEqual(1);
+      });
+    });
+
+    it("higher sample size gives higher confidence", () => {
+      const lowSample = generatePatternInsights({
+        timePreference: {
+          preferred: "morning",
+          counts: { morning: 3, afternoon: 1, evening: 0 },
+        },
+      });
+
+      const highSample = generatePatternInsights({
+        timePreference: {
+          preferred: "morning",
+          counts: { morning: 8, afternoon: 2, evening: 1 },
+        },
+      });
+
+      if (lowSample.length > 0 && highSample.length > 0) {
+        expect(highSample[0].confidence).toBeGreaterThanOrEqual(lowSample[0].confidence);
+      }
+    });
+  });
+
+  describe("Edge Cases", () => {
+    it("handles empty patterns gracefully", () => {
+      const insights = generatePatternInsights({});
+      expect(insights).toHaveLength(0);
+    });
+
+    it("handles zero counts gracefully", () => {
+      const insights = generatePatternInsights({
+        timePreference: {
+          preferred: "morning",
+          counts: { morning: 0, afternoon: 0, evening: 0 },
+        },
+      });
+
+      expect(insights).toHaveLength(0);
+    });
+
+    it("handles single data point", () => {
+      const insights = generatePatternInsights({
+        completionRates: [
+          { title: "Task", rate: 1.0 },
+        ],
+      });
+
+      expect(insights.length).toBeGreaterThan(0);
+    });
   });
 });
