@@ -82,29 +82,54 @@ export function createIntentService(client: AIClient) {
           apply: applyIntent(plan, validated.intent),
         };
       }
-      return { source: "ai", resolution: validated, intent: aiIntent };
+      Logger.warn("[intent] AI intent validation failed, falling back to deterministic");
     }
 
     aiAnalytics.recordOperation("deterministic");
-    const deterministic = understandIntent(input, plan);
-    let resolution: IntentResolution = deterministic;
-    let intent = deterministic.intent;
 
-    if (deterministic.status === "resolved" && deterministic.intent) {
-      const validated = validateIntent(deterministic.intent, plan);
-      resolution = validated;
-      intent = validated.intent;
+    const parts = input.split(/\s+(?:and|also|plus|then|,\s*)\s+/i).filter((p) => p.trim().length > 2);
+    const allChanges: import("../IntentApplier").AppliedChange[] = [];
+    let currentPlan = plan;
+    let lastResolution: IntentResolution | null = null;
+    let firstDetectedIntent: Intent | undefined;
+
+    const searchParts = parts.length > 1 ? parts : [input];
+
+    for (const part of searchParts) {
+      const deterministic = understandIntent(part.trim(), currentPlan);
+      lastResolution = deterministic;
+
+      if (deterministic.status === "resolved" && deterministic.intent) {
+        if (!firstDetectedIntent) firstDetectedIntent = deterministic.intent;
+        const validated = validateIntent(deterministic.intent, currentPlan);
+        if (validated.status === "resolved" && validated.intent) {
+          const result = applyIntent(currentPlan, validated.intent);
+          currentPlan = result.plan;
+          allChanges.push(...result.changes);
+        }
+      }
+    }
+
+    if (allChanges.length === 0) {
+      return {
+        source: "deterministic",
+        resolution: lastResolution ?? { status: "general", message: "no intents found" },
+        intent: undefined,
+        failure,
+        apply: undefined,
+      };
     }
 
     return {
       source: "deterministic",
-      resolution,
-      intent,
+      resolution: lastResolution!,
+      intent: firstDetectedIntent,
       failure,
-      apply:
-        resolution.status === "resolved" && intent
-          ? applyIntent(plan, intent)
-          : undefined,
+      apply: {
+        plan: currentPlan,
+        changes: allChanges,
+        affectedWindow: allChanges[0]?.title ?? "now",
+      },
     };
   }
 

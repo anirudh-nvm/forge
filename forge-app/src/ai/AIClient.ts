@@ -72,6 +72,12 @@ export class AIClient {
     return this.provider.isConfigured();
   }
 
+  async warmup(): Promise<void> {
+    if (this.provider.warmup) {
+      await this.provider.warmup();
+    }
+  }
+
   setProvider(provider: AIProvider): void {
     this.provider = provider;
   }

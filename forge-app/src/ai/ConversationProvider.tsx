@@ -7,8 +7,9 @@ import {
 } from "react";
 import type { BrainOutput } from "../brain/types";
 import type { CalendarEvent } from "../types/calendar";
-import { generatePlan } from "../brain/Brain";
+import { generatePlan, type BrainDeps } from "../brain/Brain";
 import { ConversationEngine } from "./ConversationEngine";
+import { createForgeAI } from "./services/index";
 
 export type UnderstandSource = "llm" | "deterministic";
 
@@ -25,6 +26,15 @@ type ConversationContextType = {
 
 const ConversationContext = createContext<ConversationContextType | null>(null);
 
+let cachedAI: ReturnType<typeof createForgeAI> | null = null;
+
+function getAI() {
+  if (!cachedAI) {
+    cachedAI = createForgeAI();
+  }
+  return cachedAI;
+}
+
 export function ConversationProvider({ children }: { children: ReactNode }) {
   const [isThinking, setThinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,14 +45,19 @@ export function ConversationProvider({ children }: { children: ReactNode }) {
       setError(null);
 
       try {
-        await ConversationEngine.understandWithValidation(input);
-      } catch {
-        // LLM path not yet implemented — fall through to deterministic pipeline.
-      }
+        const ai = getAI();
+        const brainDeps: BrainDeps | undefined = ai.configured
+          ? {
+              ai: {
+                chat: (params) => ai.client.json(params),
+                isConfigured: () => ai.client.isConfigured(),
+              },
+            }
+          : undefined;
 
-      try {
-        const output = await generatePlan({ conversation: input, priorities, currentTime: new Date(), calendarEvents });
-        return { output, source: "deterministic" };
+        const output = await generatePlan({ conversation: input, priorities, currentTime: new Date(), calendarEvents }, brainDeps);
+        const source: UnderstandSource = output.reasoning.some((r) => r.includes("source: ai")) ? "llm" : "deterministic";
+        return { output, source };
       } catch (e) {
         const message = e instanceof Error ? e.message : "unknown error";
         setError(message);

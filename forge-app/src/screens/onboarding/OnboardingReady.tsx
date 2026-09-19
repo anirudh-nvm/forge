@@ -62,7 +62,7 @@ export default function OnboardingReady() {
 
       navigation.reset({
         index: 0,
-        routes: [{ name: "Conversation" }],
+        routes: [{ name: "OnboardingExplainer" }],
       });
     } catch (error) {
       console.error("failed to save onboarding:", error);

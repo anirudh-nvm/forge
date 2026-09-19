@@ -144,7 +144,7 @@ export default function OnboardingPriorities() {
 
         <FadeInView delay={600} style={styles.footer}>
           <Pressable
-            style={[styles.button, selected.length === 0 && styles.buttonDisabled]}
+            style={[styles.button, selected.length !== 2 && styles.buttonDisabled]}
             onPress={handleContinue}
             disabled={selected.length !== 2}
           >

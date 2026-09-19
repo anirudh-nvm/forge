@@ -71,14 +71,20 @@ export class GeminiProvider implements AIProvider {
 
     try {
       const startedAt = Date.now();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
       const response = await fetch(
         `${this.baseUrl}/models/${this.model}:generateContent?key=${this.apiKey}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
+          signal: controller.signal,
         }
       );
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const detail = await response.text();
@@ -102,6 +108,12 @@ export class GeminiProvider implements AIProvider {
       );
     } catch (e) {
       if (e instanceof AIProviderError) throw e;
+      if (e instanceof Error && e.name === "AbortError") {
+        throw new AIProviderError(
+          `gemini request timed out after 15s`,
+          this.name
+        );
+      }
       throw new AIProviderError(
         `gemini request failed: ${e instanceof Error ? e.message : "unknown error"}`,
         this.name
@@ -132,6 +144,30 @@ export class GeminiProvider implements AIProvider {
   private ensureConfigured(): void {
     if (!this.isConfigured()) {
       throw new AIProviderNotConfiguredError(this.name);
+    }
+  }
+
+  async warmup(): Promise<void> {
+    if (!this.isConfigured()) return;
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      await fetch(
+        `${this.baseUrl}/models/${this.model}:generateContent?key=${this.apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: "hi" }] }],
+            generationConfig: { maxOutputTokens: 1 },
+          }),
+          signal: controller.signal,
+        }
+      );
+      clearTimeout(timeoutId);
+      Logger.log("[gemini] connection warmed up");
+    } catch {
+      // warmup is best-effort — don't block the app
     }
   }
 }

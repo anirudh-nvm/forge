@@ -1,10 +1,13 @@
 import type { TodayPlan } from "../types/todayPlan";
 import type { Commitment } from "../types/commitment";
-import type { Intent, IntentResolution } from "./IntentTypes";
+import type { Intent, IntentResolution, GoalType } from "./IntentTypes";
 import { extractEntities } from "../brain/pipeline/EntityExtractor";
 import { extractTimes } from "../brain/pipeline/TimeExtractor";
 import { extractConstraints } from "../brain/pipeline/ConstraintExtractor";
 import { parseTimeToMinutes as toMinutes } from "../utils/timeUtils";
+import { detectAnchorType, DEFAULT_ANCHOR_TIMES } from "../day/DayAnchorEngine";
+
+const MEAL_WORDS = /\b(breakfast|lunch|dinner)\b/i;
 
 const CANCEL_WORDS =
   /\b(cancel|cancelled|canceled|remove|delete|skip|drop|scrap|call off|call-off|off|no more|forget|change my mind about|can't do|cannot do|not doing|won't do|wont do)\b/i;
@@ -16,12 +19,20 @@ const MOVE_EARLIER_WORDS =
 const MOVE_SHORT = /\b(move|push|shift|postpone|reschedule|delay|bump)\b/i;
 
 const ADD_WORDS =
-  /\b(add|include|insert|also need|need to add|want to add|schedule|add a|add an)\b/i;
+  /\b(add|include|insert|also need|need to add|want to add|schedule|add a|add an|have to|got to|need to|going to|must|should|gotta|wanna|tryna)\b/i;
 
 const DELAY_WORDS = /\b(delay|postpone|push back|push back by|bump)\b/i;
 
 const TIRED_WORDS =
   /\b(tired|exhausted|drained|burned out|not feeling well|sick|unwell|low energy|no energy|fatigued|not feeling it|behind on|burned out|lighter day|easier day|recovering|recovery|under the weather)\b/i;
+
+const GOAL_PATTERNS: { pattern: RegExp; goal: GoalType; reason: string }[] = [
+  { pattern: /\b(too much|overwhelmed|swamped|drowning|can't handle|too heavy|way too)\b/i, goal: "reduce_load", reason: "overwhelmed" },
+  { pattern: /\b(lighter|easier|less intense|take it easy|chill day|relaxed day)\b/i, goal: "lighter_day", reason: "requested lighter day" },
+  { pattern: /\b(postpone|push back|delay|move to tomorrow|do it later)\b.*\b(study|dsa|cat|revision|homework|assignment)\b/i, goal: "postpone_heavy", reason: "postpone heavy work" },
+  { pattern: /\b(skip|cancel|clear)\b.*\b(today|everything|the whole day)\b/i, goal: "skip_day", reason: "skip the day" },
+  { pattern: /\b(reschedule|move|shift)\b.*\b(study|dsa|cat|revision)\b.*\b(tomorrow|later|next)\b/i, goal: "reschedule_study", reason: "reschedule study" },
+];
 
 const CANCEL_ALL_WORDS =
   /\b(cancel|remove|delete|clear|scrap)\b.*\b(today|everything|all of it|the whole day|the day)\b/i;
@@ -235,11 +246,18 @@ function detectAdd(plan: TodayPlan, input: string): Intent | null {
     );
     if (!exists) {
       const times = extractTimes(input);
+      const durationMatch = input.match(DURATION_AMOUNT);
+      let durationMinutes: number | undefined;
+      if (durationMatch) {
+        if (durationMatch[1]) durationMinutes = parseInt(durationMatch[1], 10) * 60;
+        else if (durationMatch[2]) durationMinutes = parseInt(durationMatch[2], 10);
+      }
       return {
         type: "add_commitment",
         title: entity.normalized,
         startTime: times.startTime,
         endTime: times.endTime,
+        durationMinutes,
         constraints: extractConstraints(input),
         confidence: 0.9,
       };
@@ -282,6 +300,32 @@ function detectEnergy(input: string): Intent | null {
   };
 }
 
+function detectGoal(input: string): Intent | null {
+  for (const { pattern, goal, reason } of GOAL_PATTERNS) {
+    if (pattern.test(input)) {
+      return {
+        type: "goal",
+        goal,
+        reason,
+        confidence: 0.85,
+      };
+    }
+  }
+  return null;
+}
+
+function splitCompoundIntents(input: string): string[] {
+  const parts = input.split(/\s+(?:and|also|plus|then|while|,\s*)\s+/i);
+  if (parts.length <= 1) return [input];
+
+  const meaningful = parts.filter((p) => {
+    const trimmed = p.trim();
+    return trimmed.length > 2 && !/^(and|also|plus|then|while)$/i.test(trimmed);
+  });
+
+  return meaningful.length > 0 ? meaningful : [input];
+}
+
 export function understandIntent(input: string, plan: TodayPlan): IntentResolution {
   const trimmed = input.trim();
   if (trimmed.length === 0) {
@@ -291,9 +335,77 @@ export function understandIntent(input: string, plan: TodayPlan): IntentResoluti
     };
   }
 
+  const parts = splitCompoundIntents(trimmed);
+
+  if (parts.length > 1) {
+    const intents: Intent[] = [];
+    const messages: string[] = [];
+
+    for (const part of parts) {
+      const result = understandSingleIntent(part.trim(), plan);
+      if (result.status === "resolved" && result.intent) {
+        intents.push(result.intent);
+        messages.push(result.message);
+      }
+    }
+
+    if (intents.length === 1) {
+      return { status: "resolved", intent: intents[0], message: messages[0] };
+    }
+
+    if (intents.length > 1) {
+      return {
+        status: "resolved",
+        intent: intents[0],
+        message: `compound: ${messages.join("; ")}`,
+      };
+    }
+
+    return {
+      status: "general",
+      message: "couldn't understand the individual parts.",
+    };
+  }
+
+  return understandSingleIntent(trimmed, plan);
+}
+
+function understandSingleIntent(trimmed: string, plan: TodayPlan): IntentResolution {
+
   const energy = detectEnergy(trimmed);
   if (energy) {
     return { status: "resolved", intent: energy, message: "energy intent" };
+  }
+
+  const mealMatch = trimmed.match(MEAL_WORDS);
+  if (mealMatch) {
+    const mealName = mealMatch[1].toLowerCase();
+    const times = extractTimes(trimmed);
+    const hasExplicitTime = times.startTime || times.endTime || /\d/.test(trimmed.replace(mealName, ""));
+
+    if (!hasExplicitTime) {
+      const anchorType = detectAnchorType(mealName);
+      if (anchorType) {
+        const anchorTime = DEFAULT_ANCHOR_TIMES[anchorType as keyof typeof DEFAULT_ANCHOR_TIMES];
+        const exists = plan.commitments.some(
+          (c) => c.title.toLowerCase() === mealName
+        );
+
+        if (!exists) {
+          return {
+            status: "resolved",
+            intent: {
+              type: "add_commitment",
+              title: mealName.charAt(0).toUpperCase() + mealName.slice(1),
+              startTime: anchorTime,
+              endTime: anchorTime,
+              confidence: 0.95,
+            },
+            message: "meal as fixed event",
+          };
+        }
+      }
+    }
   }
 
   const cancel = detectCancel(plan, trimmed);
@@ -307,6 +419,41 @@ export function understandIntent(input: string, plan: TodayPlan): IntentResoluti
 
   const add = detectAdd(plan, trimmed);
   if (add) return { status: "resolved", intent: add, message: "add intent" };
+
+  const goal = detectGoal(trimmed);
+  if (goal) {
+    return { status: "resolved", intent: goal, message: "goal intent" };
+  }
+
+  const times = extractTimes(trimmed);
+  const entities = extractEntities(trimmed);
+  if ((times.startTime || times.endTime) && entities.length > 0) {
+    const entity = entities[0];
+    const exists = plan.commitments.some(
+      (c) => c.title.toLowerCase() === entity.normalized.toLowerCase()
+    );
+    if (!exists) {
+      const durationMatch = trimmed.match(DURATION_AMOUNT);
+      let durationMinutes: number | undefined;
+      if (durationMatch) {
+        if (durationMatch[1]) durationMinutes = parseInt(durationMatch[1], 10) * 60;
+        else if (durationMatch[2]) durationMinutes = parseInt(durationMatch[2], 10);
+      }
+      return {
+        status: "resolved",
+        intent: {
+          type: "add_commitment",
+          title: entity.normalized,
+          startTime: times.startTime,
+          endTime: times.endTime,
+          durationMinutes,
+          constraints: extractConstraints(trimmed),
+          confidence: 0.8,
+        },
+        message: "add intent (inferred from time + entity)",
+      };
+    }
+  }
 
   const movedTarget = extractEntities(trimmed).length > 0;
   const referenced = plan.commitments.some((c) =>

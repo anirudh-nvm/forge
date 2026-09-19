@@ -7,6 +7,7 @@ export type IntentType =
   | "move_commitment"
   | "delay_commitment"
   | "energy"
+  | "goal"
   | "general_conversation";
 
 export interface ModifyCommitmentIntent {
@@ -31,6 +32,7 @@ export interface AddCommitmentIntent {
   title: string;
   startTime?: string;
   endTime?: string;
+  durationMinutes?: number;
   constraints?: StructuredConstraint[];
   confidence: number;
 }
@@ -56,6 +58,20 @@ export interface EnergyIntent {
   confidence: number;
 }
 
+export type GoalType =
+  | "reduce_load"
+  | "postpone_heavy"
+  | "skip_day"
+  | "lighter_day"
+  | "reschedule_study";
+
+export interface GoalIntent {
+  type: "goal";
+  goal: GoalType;
+  reason: string;
+  confidence: number;
+}
+
 export interface GeneralConversationIntent {
   type: "general_conversation";
   message: string;
@@ -69,6 +85,7 @@ export type Intent =
   | MoveCommitmentIntent
   | DelayCommitmentIntent
   | EnergyIntent
+  | GoalIntent
   | GeneralConversationIntent;
 
 export type IntentResolutionStatus =

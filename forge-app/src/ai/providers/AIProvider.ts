@@ -26,4 +26,7 @@ export interface AIProvider {
   status(): ProviderStatus;
 
   isConfigured(): boolean;
+
+  /** Best-effort connection warmup. Failures are silently ignored. */
+  warmup?(): Promise<void>;
 }

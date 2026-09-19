@@ -49,6 +49,8 @@ export function validateIntent(intent: Intent, plan: TodayPlan): IntentResolutio
     }
     case "energy":
       return { status: "resolved", intent, message: "energy intent validated" };
+    case "goal":
+      return { status: "resolved", intent, message: "goal intent validated" };
     case "general_conversation":
       return { status: "general", message: "general conversation" };
   }

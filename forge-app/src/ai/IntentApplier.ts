@@ -2,6 +2,7 @@ import type { TodayPlan } from "../types/todayPlan";
 import type { Commitment } from "../types/commitment";
 import type { Intent } from "./IntentTypes";
 import { parseTimeToMinutes as toMinutes, formatTime } from "../utils/timeUtils";
+import { resolveGoal } from "./GoalResolver";
 
 export type AppliedChange = {
   type: "modify" | "cancel" | "add" | "move" | "delay";
@@ -58,14 +59,73 @@ function cascadeShift(plan: TodayPlan, fromIndex: number): void {
   );
 }
 
+function hasOverlapWithLocked(
+  plan: TodayPlan,
+  excludeTitle: string,
+  start: number,
+  end: number
+): string | null {
+  for (const c of plan.commitments) {
+    if (c.title.toLowerCase() === excludeTitle.toLowerCase()) continue;
+    if (!c.locked) continue;
+    const cStart = toMinutes(c.startTime);
+    const cEnd = toMinutes(c.endTime);
+    if (start < cEnd && end > cStart) {
+      return c.title;
+    }
+  }
+  return null;
+}
+
+function hasOverlapWithAny(
+  plan: TodayPlan,
+  excludeTitle: string,
+  start: number,
+  end: number
+): boolean {
+  for (const c of plan.commitments) {
+    if (c.title.toLowerCase() === excludeTitle.toLowerCase()) continue;
+    const cStart = toMinutes(c.startTime);
+    const cEnd = toMinutes(c.endTime);
+    if (start < cEnd && end > cStart) return true;
+  }
+  return false;
+}
+
+function findFreeSlot(
+  plan: TodayPlan,
+  excludeTitle: string,
+  durationMinutes: number,
+  currentTimeMinutes?: number
+): { start: number; end: number } | null {
+  const DAY_START = 7 * 60;
+  const DAY_END = 22 * 60;
+  const occupied = plan.commitments
+    .filter((c) => c.title.toLowerCase() !== excludeTitle.toLowerCase())
+    .map((c) => ({ start: toMinutes(c.startTime), end: toMinutes(c.endTime) }))
+    .sort((a, b) => a.start - b.start);
+
+  let cursor = currentTimeMinutes ?? DAY_START;
+  for (const slot of occupied) {
+    if (cursor + durationMinutes <= slot.start) {
+      return { start: cursor, end: cursor + durationMinutes };
+    }
+    cursor = Math.max(cursor, slot.end);
+  }
+  if (cursor + durationMinutes <= DAY_END) {
+    return { start: cursor, end: cursor + durationMinutes };
+  }
+  return null;
+}
+
 function applyModify(
   plan: TodayPlan,
   target: string,
   changes: { startTime?: string; endTime?: string; durationMinutes?: number },
   changesOut: AppliedChange[]
-): void {
+): boolean {
   const commitment = findCommitment(plan, target);
-  if (!commitment) return;
+  if (!commitment) return false;
 
   const oldStart = commitment.startTime;
   const oldEnd = commitment.endTime;
@@ -79,19 +139,44 @@ function applyModify(
     );
   }
 
+  const newStart = toMinutes(commitment.startTime);
+  const newEnd = toMinutes(commitment.endTime);
+  const newDuration = newEnd - newStart;
+  const conflict = hasOverlapWithLocked(plan, target, newStart, newEnd);
+
+  if (conflict) {
+    const now = new Date();
+    const currentTimeMinutes = now.getHours() * 60 + now.getMinutes();
+    const slot = findFreeSlot(plan, target, newDuration, currentTimeMinutes);
+    if (slot) {
+      commitment.startTime = formatTime(slot.start / 60);
+      commitment.endTime = formatTime(slot.end / 60);
+    } else {
+      commitment.startTime = oldStart;
+      commitment.endTime = oldEnd;
+      changesOut.push({
+        type: "modify",
+        title: commitment.title,
+        detail: `can't fit ${newDuration} minutes anywhere — conflicts with locked ${conflict}`,
+      });
+      return false;
+    }
+  }
+
   const index = plan.commitments.indexOf(commitment);
   cascadeShift(plan, index);
 
-  const newDuration = toMinutes(commitment.endTime) - toMinutes(commitment.startTime);
+  const finalDuration = toMinutes(commitment.endTime) - toMinutes(commitment.startTime);
   const parts: string[] = [];
-  if (changes.startTime && changes.startTime !== oldStart) {
-    parts.push(`starts at ${commitment.startTime}`);
+  if (commitment.startTime !== oldStart) {
+    parts.push(`moved to ${commitment.startTime}`);
   }
-  if (changes.endTime && changes.endTime !== oldEnd) {
-    parts.push(`ends at ${commitment.endTime}`);
-  }
-  if (changes.durationMinutes && newDuration !== oldDuration) {
-    parts.push(`now ${newDuration} minutes long`);
+  if (commitment.endTime !== oldEnd) {
+    if (finalDuration > oldDuration) {
+      parts.push(`extended until ${commitment.endTime}`);
+    } else if (finalDuration < oldDuration) {
+      parts.push(`shortened to ${commitment.endTime}`);
+    }
   }
 
   changesOut.push({
@@ -99,6 +184,7 @@ function applyModify(
     title: commitment.title,
     detail: parts.join(", ") || `${oldStart}–${oldEnd} → ${commitment.startTime}–${commitment.endTime}`,
   });
+  return true;
 }
 
 function applyCancel(plan: TodayPlan, target: string, changesOut: AppliedChange[]): void {
@@ -126,47 +212,82 @@ function applyAdd(
   title: string,
   startTime: string | undefined,
   endTime: string | undefined,
+  durationMinutes: number | undefined,
   changesOut: AppliedChange[]
 ): void {
   const duration = startTime && endTime
     ? toMinutes(endTime) - toMinutes(startTime)
-    : 60;
+    : durationMinutes ?? 60;
 
-  let start = startTime ? toMinutes(startTime) : DAY_START;
-  const end = startTime && endTime ? toMinutes(endTime) : start + duration;
+  if (startTime && endTime) {
+    const start = toMinutes(startTime);
+    const end = toMinutes(endTime);
 
-  const sorted = [...plan.commitments].sort(
-    (a, b) => toMinutes(a.startTime) - toMinutes(b.startTime)
-  );
-
-  for (const block of sorted) {
-    const blockStart = toMinutes(block.startTime);
-    const blockEnd = toMinutes(block.endTime);
-    if (start < blockEnd && end > blockStart) {
-      start = blockEnd;
+    const conflict = hasOverlapWithLocked(plan, title, start, end);
+    if (conflict) {
+      changesOut.push({
+        type: "add",
+        title,
+        detail: `can't add — conflicts with locked ${conflict}`,
+      });
+      return;
     }
+
+    const commitment: Commitment = {
+      id: title.toLowerCase().replace(/\s+/g, "-"),
+      title,
+      startTime,
+      endTime,
+      completed: false,
+      locked: false,
+      priority: "medium",
+    };
+
+    plan.commitments.push(commitment);
+    plan.commitments.sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
+
+    changesOut.push({
+      type: "add",
+      title,
+      detail: `added ${startTime} to ${endTime}`,
+    });
+    return;
   }
 
-  const newStart = formatTime(start / 60);
-  const newEnd = formatTime((start + duration) / 60);
+  const planStart = plan.commitments.length > 0
+    ? Math.min(...plan.commitments.map((c) => toMinutes(c.startTime)))
+    : DAY_START;
+  const freeSlot = findFreeSlot(plan, title, duration, planStart);
 
-  const commitment: Commitment = {
-    id: title.toLowerCase().replace(/\s+/g, "-"),
-    title,
-    startTime: newStart,
-    endTime: newEnd,
-    completed: false,
-    locked: false,
-    priority: "medium",
-  };
+  if (freeSlot) {
+    const newStart = formatTime(freeSlot.start / 60);
+    const newEnd = formatTime(freeSlot.end / 60);
 
-  plan.commitments.push(commitment);
-  plan.commitments.sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
+    const commitment: Commitment = {
+      id: title.toLowerCase().replace(/\s+/g, "-"),
+      title,
+      startTime: newStart,
+      endTime: newEnd,
+      completed: false,
+      locked: false,
+      priority: "medium",
+    };
+
+    plan.commitments.push(commitment);
+    plan.commitments.sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
+
+    changesOut.push({
+      type: "add",
+      title,
+      detail: `added ${newStart} to ${newEnd}`,
+    });
+    return;
+  }
 
   changesOut.push({
     type: "add",
     title,
-    detail: `added ${newStart} to ${newEnd}`,
+    detail: `can't add ${title} — day is full. try shortening or removing something first.`,
   });
 }
 
@@ -270,7 +391,7 @@ export function applyIntent(plan: TodayPlan, intent: Intent): ApplyResult {
       applyCancel(newPlan, intent.target, changes);
       break;
     case "add_commitment":
-      applyAdd(newPlan, intent.title, intent.startTime, intent.endTime, changes);
+      applyAdd(newPlan, intent.title, intent.startTime, intent.endTime, intent.durationMinutes, changes);
       break;
     case "move_commitment":
       applyMove(newPlan, intent.target, intent.direction, intent.minutes, changes);
@@ -278,6 +399,14 @@ export function applyIntent(plan: TodayPlan, intent: Intent): ApplyResult {
     case "delay_commitment":
       applyDelay(newPlan, intent.target, intent.minutes, changes);
       break;
+    case "goal": {
+      const { plan: goalPlan, changes: goalChanges } = resolveGoal(newPlan, intent.goal, intent.reason);
+      Object.assign(newPlan, goalPlan);
+      for (const detail of goalChanges) {
+        changes.push({ type: "modify", title: detail.split(" ")[0], detail });
+      }
+      break;
+    }
     case "energy":
     case "general_conversation":
       break;

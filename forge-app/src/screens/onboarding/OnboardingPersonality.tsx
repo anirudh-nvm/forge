@@ -24,7 +24,7 @@ export default function OnboardingPersonality() {
 
   const handleSelect = (personality: MentorPersonality) => {
     updateData({ personality });
-    navigation.navigate("OnboardingReady");
+    navigation.navigate("OnboardingExplainer");
   };
 
   return (
