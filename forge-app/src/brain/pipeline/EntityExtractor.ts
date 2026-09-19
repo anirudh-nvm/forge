@@ -13,7 +13,12 @@ const ENTITIES: Record<string, string> = {
   lecture: "College",
   lectures: "College",
   seminar: "College",
-  cat: "Competitive Exam",
+  "cat prep": "CAT Prep",
+  "cat preparation": "CAT Prep",
+  "cat application": "CAT Application",
+  "cat form": "CAT Application",
+  "cat application form": "CAT Application",
+  cat: "CAT Prep",
   jee: "Competitive Exam",
   gre: "Competitive Exam",
   upsc: "Competitive Exam",
@@ -92,6 +97,8 @@ const ENTITIES: Record<string, string> = {
   "check email": "Email",
   meeting: "Meeting",
   meetings: "Meeting",
+  meet: "Meeting",
+  professor: "Professor",
   standup: "Standup",
   "stand up": "Standup",
   coding: "Coding",
@@ -221,4 +228,52 @@ export function resolveEntity(text: string): string | null {
 
 export function entityCount(): number {
   return new Set(Object.values(ENTITIES)).size;
+}
+
+// ── Negation detection ──────────────────────────────────────────
+
+const NEGATION_PATTERNS = [
+  /(?:no|without|skip|not today|don't need|don't want|not doing|no need for|drop)\s+(\w+(?:\s+\w+)?)/gi,
+  /(?:don't|dont|do not)\s+(?:need|want|have|do)\s+(\w+(?:\s+\w+)?)/gi,
+  /(?:can(?:'t|not)|won't|wont)\s+(?:do|make|get|have)\s+(\w+(?:\s+\w+)?)/gi,
+];
+
+export function extractNegatedEntities(text: string): string[] {
+  const negated: string[] = [];
+  const lower = text.toLowerCase();
+
+  for (const pattern of NEGATION_PATTERNS) {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const phrase = match[1].trim().toLowerCase();
+      // Try resolving as entity
+      const resolved = resolveEntity(phrase);
+      if (resolved) {
+        negated.push(resolved);
+        continue;
+      }
+      // Try partial matches (e.g., "gym today" → "gym")
+      const words = phrase.split(/\s+/);
+      for (let i = words.length; i > 0; i--) {
+        const subphrase = words.slice(0, i).join(" ");
+        const subResolved = resolveEntity(subphrase);
+        if (subResolved && !negated.includes(subResolved)) {
+          negated.push(subResolved);
+          break;
+        }
+      }
+    }
+  }
+
+  // Also check for "today but no X" pattern
+  const butNoMatch = lower.match(/but\s+no\s+(\w+(?:\s+\w+)?)/i);
+  if (butNoMatch) {
+    const phrase = butNoMatch[1].trim();
+    const resolved = resolveEntity(phrase);
+    if (resolved && !negated.includes(resolved)) {
+      negated.push(resolved);
+    }
+  }
+
+  return [...new Set(negated)];
 }

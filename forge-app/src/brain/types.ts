@@ -28,6 +28,7 @@ export interface StructuredConstraint {
 export interface FlexibleTask {
   title: string;
   estimatedMinutes?: number;
+  sessionCount?: number;
   constraints: StructuredConstraint[];
   confidence: number;
 }
@@ -119,6 +120,13 @@ export interface BrainInput {
   priorities: string[];
   currentTime: Date;
   calendarEvents?: CalendarEvent[];
+}
+
+export interface BrainDeps {
+  ai?: {
+    chat: <T>(params: import("../ai/types/AIResponse").ChatParams) => Promise<import("../ai/types/AIResponse").JSONResult<T>>;
+    isConfigured: () => boolean;
+  };
 }
 
 export interface BrainOutput {

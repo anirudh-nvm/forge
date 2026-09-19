@@ -1,5 +1,5 @@
 import type { JSONResult } from "./types/AIResponse";
-import { AIJSONParseError } from "./types/AIResponse";
+import { AIJSONParseError, AIProviderError } from "./types/AIResponse";
 import { JSON_MODE_INSTRUCTION } from "./JSONMode";
 import { aiAnalytics } from "./AIAnalytics";
 
@@ -18,13 +18,28 @@ const DEFAULT_RETRY_HINT = `Your previous response was not valid JSON. Please tr
 
 ${JSON_MODE_INSTRUCTION}`;
 
+function isRetryableError(e: unknown): boolean {
+  if (e instanceof AIJSONParseError) return true;
+  if (e instanceof AIProviderError) {
+    const msg = e.message.toLowerCase();
+    return msg.includes("timed out") || msg.includes("timeout") || msg.includes("network") || msg.includes("fetch");
+  }
+  if (e instanceof Error) {
+    return e.name === "AbortError" || e.name === "TypeError";
+  }
+  return false;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 /**
  * Phase 5 — Retry Engine.
  *
- * Models occasionally reply with:
- *   Sure! Here's your JSON: { ... }
- * which breaks parsing. Retry logic: attempt → parse → failed →
- * re-ask with a hint → return valid JSON. The user never notices.
+ * Retries on:
+ *  - JSON parse errors (re-asks with hint)
+ *  - Network/timeout errors (re-asks after backoff)
  */
 export async function jsonWithRetry<T>(
   provider: JSONCapable,
@@ -45,35 +60,25 @@ export async function jsonWithRetry<T>(
       options?.onRetry?.(attempt, e);
 
       if (attempt >= maxAttempts) break;
-      if (!(e instanceof AIJSONParseError)) break;
+      if (!isRetryableError(e)) break;
 
-      aiAnalytics.recordParseFailure();
-      aiAnalytics.recordRetry();
-
-      currentParams = {
-        ...currentParams,
-        messages: [
-          ...currentParams.messages,
-          {
-            role: "assistant",
-            content: e.raw.slice(0, 500),
-          },
-          {
-            role: "user",
-            content: hint,
-          },
-        ],
-      };
+      if (e instanceof AIJSONParseError) {
+        aiAnalytics.recordParseFailure();
+        aiAnalytics.recordRetry();
+        currentParams = {
+          ...currentParams,
+          messages: [
+            ...currentParams.messages,
+            { role: "assistant", content: e.raw.slice(0, 500) },
+            { role: "user", content: hint },
+          ],
+        };
+      } else {
+        aiAnalytics.recordRetry();
+        await sleep(1000 * attempt);
+      }
     }
   }
 
   throw lastError;
-}
-
-export async function chatWithRetry<T>(
-  provider: JSONCapable,
-  params: Parameters<JSONCapable["json"]>[0],
-  options?: RetryOptions
-): Promise<JSONResult<T>> {
-  return jsonWithRetry<T>(provider, params, options);
 }

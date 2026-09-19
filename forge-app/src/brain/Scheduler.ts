@@ -247,7 +247,13 @@ function resolveTarget(target: string): number | null {
   const lower = target.toLowerCase();
   if (lower in ANCHOR_TIMES) return ANCHOR_TIMES[lower];
   const timeMatch = target.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM|am|pm)?/);
-  if (timeMatch) return parseTime(timeMatch[0]);
+  if (timeMatch) {
+    const time = parseTime(timeMatch[0]);
+    if (time === 0 && (lower.includes("am") || lower === "midnight")) {
+      return 24;
+    }
+    return time;
+  }
   return null;
 }
 
@@ -605,6 +611,40 @@ function makeCommitmentId(title: string, commitments: Commitment[]): string {
   return `${base}-${n}`;
 }
 
+// ── Session splitting (Sprint 1) ───────────────────────────────
+
+function roundToNearest30(minutes: number): number {
+  return Math.round(minutes / 30) * 30;
+}
+
+function splitIntoSessions(
+  totalMinutes: number,
+  sessionCount: number,
+  breakMinutes: number = 15
+): { durationMinutes: number; breakAfterMinutes: number }[] {
+  if (sessionCount <= 1) {
+    return [{ durationMinutes: totalMinutes, breakAfterMinutes: 0 }];
+  }
+
+  // Round to nearest 30 for each session
+  const basePerSession = roundToNearest30(totalMinutes / sessionCount);
+  const sessions: { durationMinutes: number; breakAfterMinutes: number }[] = [];
+  let remaining = totalMinutes;
+
+  for (let i = 0; i < sessionCount; i++) {
+    const isLast = i === sessionCount - 1;
+    // Last session gets the remainder
+    const duration = isLast ? remaining : Math.min(basePerSession, remaining - (sessionCount - i - 1) * basePerSession);
+    sessions.push({
+      durationMinutes: Math.max(30, duration), // minimum 30 min per session
+      breakAfterMinutes: isLast ? 0 : breakMinutes,
+    });
+    remaining -= duration;
+  }
+
+  return sessions;
+}
+
 // ── Recovery buffers (Phase 6) ──────────────────────────────────
 
 function recoveryAfterEvent(event: FixedEvent, committed: Commitment): { kind: "recovery" | "break" | "buffer"; minutes: number; reason: RecoveryReason } | null {
@@ -744,7 +784,8 @@ export function scheduleDay(
   fixedEvents: FixedEvent[],
   flexibleTasks: FlexibleTask[],
   constraints: Constraint[],
-  preferences: Preference[]
+  preferences: Preference[],
+  currentTime?: Date
 ): {
   plan: TodayPlan;
   logs: LogEntry[];
@@ -764,7 +805,11 @@ export function scheduleDay(
   );
 
   const occupied = buildOccupiedTimeline(fixedEvents, protectedMealBlocks, anchorTimes);
-  const dayStart = 6;
+  const defaultDayStart = 6;
+  const currentHour = currentTime ? currentTime.getHours() + currentTime.getMinutes() / 60 : defaultDayStart;
+  const BUFFER_MINUTES = 5;
+  const roundedUp = Math.ceil((currentHour * 60 + BUFFER_MINUTES) / 15) * (15 / 60);
+  const dayStart = Math.max(defaultDayStart, roundedUp);
   const dayEnd = 24;
   const freeWindows = findFreeWindows(occupied, dayStart, dayEnd);
 
@@ -780,9 +825,58 @@ export function scheduleDay(
 
   // Schedule fixed events first
   for (const event of fixedEvents) {
+    // Handle endTime-only events (e.g. "college till 7:45pm"): derive startTime from current time
+    if (!event.startTime && event.endTime) {
+      const eventEnd = parseTime(event.endTime);
+      if (eventEnd <= currentHour) {
+        // End time already past — skip
+        warnings.push(`${event.title} ends at ${event.endTime} which is already past — skipped`);
+        continue;
+      } else {
+        // Start from NOW, not from dayStart (dayStart has buffer + rounding)
+        event.startTime = formatTime(currentHour);
+      }
+      logs.push({ module: "Scheduler", message: `✓ Derived start for ${event.title}: ${event.startTime} - ${event.endTime}` });
+    }
+
     if (!event.startTime || !event.endTime) {
       warnings.push(`${event.title} has no time range — skipped`);
       continue;
+    }
+
+    let adjustedStart = parseTime(event.startTime);
+    let adjustedEnd = parseTime(event.endTime);
+    let eventDuration = adjustedEnd - adjustedStart;
+
+    // Handle negative duration (跨越 midnight, e.g. 7:15 PM → 5:15 AM)
+    if (eventDuration < 0) {
+      eventDuration += 24;
+    }
+
+    // Sanity check: fixed events > 6 hours with ONLY endTime are likely hallucinated start times
+    // Only applies to events where we derived the startTime (endTime-only pattern)
+    if (eventDuration > 6 && !event.startTime) {
+      const derivedStart = currentHour;
+      event.startTime = formatTime(derivedStart);
+      adjustedStart = derivedStart;
+      eventDuration = adjustedEnd - derivedStart;
+      if (eventDuration < 0) eventDuration += 24;
+      logs.push({ module: "Scheduler", message: `✓ Fixed hallucinated duration for ${event.title}: derived start ${event.startTime}` });
+    }
+
+    // Clamp past fixed events to dayStart
+    if (adjustedEnd <= dayStart) {
+      // Entirely in the past — shift to dayStart
+      adjustedStart = dayStart;
+      adjustedEnd = dayStart + eventDuration;
+      event.startTime = formatTime(adjustedStart);
+      event.endTime = formatTime(adjustedEnd);
+      logs.push({ module: "Scheduler", message: `✓ Clamped past event ${event.title} to ${event.startTime} - ${event.endTime}` });
+    } else if (adjustedStart < dayStart) {
+      // Partially in the past — clamp start to dayStart
+      adjustedStart = dayStart;
+      event.startTime = formatTime(adjustedStart);
+      logs.push({ module: "Scheduler", message: `✓ Clamped start of ${event.title} to ${event.startTime}` });
     }
 
     const commitment: Commitment = {
@@ -822,50 +916,89 @@ export function scheduleDay(
     logs.push({ module: "Scheduler", message: `✓ Scheduled ${event.title} ${event.startTime} - ${event.endTime}` });
   }
 
+  // Rebuild occupied/free after clamping past fixed events
+  occupied.length = 0;
+  occupied.push(...buildOccupiedTimeline(fixedEvents, protectedMealBlocks, anchorTimes));
+  freeWindows.length = 0;
+  freeWindows.push(...findFreeWindows(occupied, dayStart, dayEnd));
+
   // Schedule flexible tasks using energy-based placement (Phase 8)
   const sortedTasks = [...flexibleTasks].sort((a, b) => b.confidence - a.confidence);
 
   for (const task of sortedTasks) {
-    const candidates = generateCandidateSlots(task, freeWindows, occupied, commitments, placedBlocks, protectedMealBlocks);
+    // Handle session splitting
+    const sessionCount = task.sessionCount ?? 1;
+    const sessions = splitIntoSessions(task.estimatedMinutes ?? 60, sessionCount);
 
-    if (candidates.length === 0) {
-      const constraintDesc = task.constraints
-        .map(c => `${c.type}${c.target ? ` ${c.target}` : ""}`)
-        .join(", ");
-      const reason = constraintDesc
-        ? `no free window satisfies constraints: ${constraintDesc}`
-        : "no free window with enough duration";
-      unscheduled.push({
-        title: task.title,
-        reason,
+    for (let sessionIdx = 0; sessionIdx < sessions.length; sessionIdx++) {
+      const session = sessions[sessionIdx];
+      const sessionTask: FlexibleTask = {
+        ...task,
+        estimatedMinutes: session.durationMinutes,
+        sessionCount: 1, // prevent recursive splitting
+        title: sessions.length > 1 ? `${task.title} (session ${sessionIdx + 1}/${sessions.length})` : task.title,
+      };
+
+      const candidates = generateCandidateSlots(sessionTask, freeWindows, occupied, commitments, placedBlocks, protectedMealBlocks);
+
+      if (candidates.length === 0) {
+        const constraintDesc = sessionTask.constraints
+          .map(c => `${c.type}${c.target ? ` ${c.target}` : ""}`)
+          .join(", ");
+        const reason = constraintDesc
+          ? `no free window satisfies constraints: ${constraintDesc}`
+          : "no free window with enough duration";
+        unscheduled.push({
+          title: sessionTask.title,
+          reason,
+        });
+        logs.push({ module: "Scheduler", message: `✗ Could not schedule ${sessionTask.title}: ${reason}` });
+        continue;
+      }
+
+      const best = candidates[0];
+      const reasons = collectPlacementReasons(sessionTask, best.slot.start, best.slot.end, occupied, commitments, placedBlocks, protectedMealBlocks);
+
+      const commitment: Commitment = {
+        id: makeCommitmentId(sessionTask.title, commitments),
+        title: sessionTask.title,
+        startTime: formatTime(best.slot.start),
+        endTime: formatTime(best.slot.end),
+        completed: false,
+        locked: false,
+        priority: "medium",
+        confidence: sessionTask.confidence,
+        note: `Flexible task with ${Math.round(sessionTask.confidence * 100)}% confidence (score: ${best.score})${sessions.length > 1 ? ` [session ${sessionIdx + 1}/${sessions.length}]` : ""}`,
+        placementReasons: reasons.map(r => r.code) as Commitment["placementReasons"],
+      };
+      commitments.push(commitment);
+      placedBlocks.push(best.slot);
+
+      logs.push({
+        module: "Scheduler",
+        message: `✓ Scheduled ${sessionTask.title} ${formatTime(best.slot.start)} - ${formatTime(best.slot.end)} (score: ${best.score})`,
       });
-      warnings.push(`couldn't fit ${task.title} today — ${reason}`);
-      logs.push({ module: "Scheduler", message: `✗ Could not schedule ${task.title}: ${reason}` });
-      continue;
+
+      // Add break after session if there are more sessions
+      if (session.breakAfterMinutes > 0 && sessionIdx < sessions.length - 1) {
+        const breakStart = best.slot.end;
+        const breakEnd = breakStart + session.breakAfterMinutes / 60;
+        placedBlocks.push({ start: breakStart, end: breakEnd });
+        recoveryItems.push({
+          id: `break-after-${task.title.toLowerCase().replace(/\s+/g, "-")}-${sessionIdx}`,
+          kind: "break",
+          title: "Break",
+          startTime: formatTime(breakStart),
+          endTime: formatTime(breakEnd),
+          locked: false,
+          recoveryReason: "between_sessions",
+        });
+        logs.push({
+          module: "Scheduler",
+          message: `✓ Break ${formatTime(breakStart)} - ${formatTime(breakEnd)} after ${sessionTask.title}`,
+        });
+      }
     }
-
-    const best = candidates[0];
-    const reasons = collectPlacementReasons(task, best.slot.start, best.slot.end, occupied, commitments, placedBlocks, protectedMealBlocks);
-
-    const commitment: Commitment = {
-      id: makeCommitmentId(task.title, commitments),
-      title: task.title,
-      startTime: formatTime(best.slot.start),
-      endTime: formatTime(best.slot.end),
-      completed: false,
-      locked: false,
-      priority: "medium",
-      confidence: task.confidence,
-      note: `Flexible task with ${Math.round(task.confidence * 100)}% confidence (score: ${best.score})`,
-      placementReasons: reasons.map(r => r.code) as Commitment["placementReasons"],
-    };
-    commitments.push(commitment);
-    placedBlocks.push(best.slot);
-
-    logs.push({
-      module: "Scheduler",
-      message: `✓ Scheduled ${task.title} ${formatTime(best.slot.start)} - ${formatTime(best.slot.end)} (score: ${best.score})`,
-    });
   }
 
   // Sort all commitments chronologically

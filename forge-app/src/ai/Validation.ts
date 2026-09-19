@@ -1,4 +1,4 @@
-import type { ConversationContract, ExtractedFixedEvent, ExtractedFlexibleTask, ExtractedConstraint } from "./ConversationContract";
+import type { ConversationContract, ExtractedFixedEvent, ExtractedFlexibleTask, ExtractedConstraint, MissingField } from "./ConversationContract";
 import { resolveEntity } from "../brain/pipeline/EntityExtractor";
 import { detectAnchorType } from "../day/DayAnchorEngine";
 
@@ -12,6 +12,7 @@ export interface ValidatedAnalysis {
   fixedEvents: ValidatedFixedEvent[];
   flexibleTasks: ValidatedFlexibleTask[];
   constraints: ValidatedConstraint[];
+  missing: MissingField[];
 }
 
 export interface ValidatedFixedEvent {
@@ -24,6 +25,7 @@ export interface ValidatedFixedEvent {
 export interface ValidatedFlexibleTask {
   title: string;
   estimatedMinutes?: number;
+  sessionCount?: number;
   constraints: ValidatedConstraint[];
   source: "user" | "memory" | "assumption";
 }
@@ -96,6 +98,7 @@ function validateSingle(contract: ConversationContract): ValidationResult {
     flexibleTasks.push({
       title: entity,
       estimatedMinutes: ft.estimatedMinutes,
+      sessionCount: ft.sessionCount,
       constraints: validConstraints,
       source: "user",
     });
@@ -122,7 +125,7 @@ function validateSingle(contract: ConversationContract): ValidationResult {
   return {
     valid: true,
     errors: [],
-    analysis: { fixedEvents, flexibleTasks, constraints },
+    analysis: { fixedEvents, flexibleTasks, constraints, missing: contract.missing ?? [] },
   };
 }
 
@@ -134,6 +137,7 @@ function repairContract(contract: ConversationContract, errors: string[]): Conve
     constraints: contract.constraints?.filter(c => c.type) ?? [],
     clarifications: contract.clarifications ?? [],
     confidence: Math.max(0.3, (contract.confidence ?? 0.5) - 0.1),
+    missing: contract.missing ?? [],
     assumptions: [...(contract.assumptions ?? []), "auto-repaired validation errors"],
   };
 }

@@ -1,6 +1,6 @@
 export type TimelineItemKind = "commitment" | "break" | "meal" | "buffer" | "recovery" | "anchor";
 
-export type RecoveryReason = "after_long_fixed" | "after_work_block" | "after_deep_work";
+export type RecoveryReason = "after_long_fixed" | "after_work_block" | "after_deep_work" | "between_sessions";
 
 export type TimelineItem = {
   id: string;

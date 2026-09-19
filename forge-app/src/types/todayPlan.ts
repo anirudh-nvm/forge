@@ -1,6 +1,8 @@
 import type { Commitment } from "./commitment";
 import type { TimelineItem } from "./timeline";
 import type { CalendarEvent } from "./calendar";
+import type { NegotiationResult } from "../brain/NegotiationEngine";
+import type { RelationshipStage } from "./companion";
 
 export type PlanStatus = "draft" | "active" | "completed" | "archived";
 
@@ -14,6 +16,7 @@ export type TodayPlan = {
   recommendation: string;
   status: PlanStatus;
   calendarEvents?: CalendarEvent[];
+  negotiation?: NegotiationResult;
 };
 
 export type UnscheduledItem = {
@@ -50,4 +53,5 @@ export type TrustEvent = {
 export type TrustScore = {
   current: number;
   history: TrustEvent[];
+  stage: RelationshipStage;
 };

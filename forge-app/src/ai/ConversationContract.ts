@@ -4,6 +4,7 @@ export interface ConversationContract {
   constraints: ExtractedConstraint[];
   clarifications: Clarification[];
   confidence: number;
+  missing: MissingField[];
   assumptions: string[];
 }
 
@@ -16,6 +17,7 @@ export interface ExtractedFixedEvent {
 export interface ExtractedFlexibleTask {
   title: string;
   estimatedMinutes?: number;
+  sessionCount?: number;
   constraints: ExtractedConstraint[];
 }
 
@@ -29,4 +31,10 @@ export interface Clarification {
   question: string;
   context: string;
   expects: "time" | "entity" | "confirmation" | "day";
+}
+
+export interface MissingField {
+  field: "duration" | "time" | "entity" | "day" | "priority";
+  commitment?: string;
+  reason: string;
 }

@@ -18,8 +18,9 @@ export function parseTimeToMinutes(timeStr: string): number {
 }
 
 export function formatTime(decimalHours: number): string {
-  const hours = Math.floor(decimalHours);
-  const minutes = Math.round((decimalHours - hours) * 60);
+  const normalized = ((decimalHours % 24) + 24) % 24;
+  const hours = Math.floor(normalized);
+  const minutes = Math.round((normalized - hours) * 60);
   const period = hours >= 12 ? "PM" : "AM";
   const h = hours > 12 ? hours - 12 : hours === 0 ? 12 : hours;
   return minutes === 0 ? `${h}:00 ${period}` : `${h}:${String(minutes).padStart(2, "0")} ${period}`;
